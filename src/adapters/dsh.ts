@@ -12,13 +12,18 @@ export function handoffPrompt(job: Job): string {
     JSON.stringify({ cwd: job.cwd, checkpoint: job.checkpoint, instruction: job.instruction }, null, 2),
   ].join('\n\n');
 }
-export class DshAdapter implements AgentAdapter {
+// Transport is also used by the isolated protocol fixtures. It does not provide
+// an execution sandbox. The shipped adapter below blocks real dispatch.
+export class DshTransport implements AgentAdapter {
   validate(config: ProjectConfig, launch: LaunchConfig): void {
     if (!config.provider || !config.model) throw Error('Explicit provider and model are required');
     if (!launch?.command || !Array.isArray(launch.args)) throw Error('Configure agents.deepseek-harness in user.json');
     const profiles = launch.args.filter(arg => arg === '--profile' || arg.startsWith('--profile='));
     const profileIndex = launch.args.indexOf('--profile');
     if (profiles.length !== 1 || profileIndex < 0 || launch.args[profileIndex + 1] !== 'sdk') throw Error('DeepSeek adapter requires the standard --profile sdk launch');
+    for (const [name, value] of Object.entries({ initializeTimeoutMs: launch.initializeTimeoutMs ?? 15000, receiptTimeoutMs: launch.receiptTimeoutMs ?? 15000, runTimeoutMs: launch.runTimeoutMs ?? 1800000 })) {
+      if (!Number.isSafeInteger(value) || value < 100 || value > 7200000) throw Error(`Invalid bounded ${name}`);
+    }
   }
   start(job: Job, launch: LaunchConfig, emit: (event: AdapterEvent) => void): AgentRun {
     this.validate(job.config, launch);
@@ -54,16 +59,20 @@ export class DshAdapter implements AgentAdapter {
         seenTurnEnd = true;
         const reason = event.data?.reason;
         if (reason?.kind !== 'completed') turnError = `Harness turn did not complete: ${JSON.stringify(reason)}`;
+        if (receipt && seenIdle) finish();
       } else if (/tool|inbox\/spliced|turn\/start/.test(event.type)) {
         // Only metadata is relayed. Tool arguments/results can contain credentials or large data.
         emit({ kind: 'log', text: event.type });
       }
     });
     const done = (async () => {
-      const timeout = setTimeout(() => fail(Error('Harness execution deadline exceeded')), launch.runTimeoutMs ?? 7_200_000);
+      const timeout = setTimeout(() => fail(Error('Harness execution deadline exceeded')), launch.runTimeoutMs ?? 1_800_000);
       try {
         const hello = await rpc.request('initialize', { cwd: job.cwd, provider: job.config.provider, model: job.config.model }, launch.initializeTimeoutMs ?? 15_000);
         if (hello?.serverInfo?.name !== 'deepseek-harness-sdk-runtime') throw Error('Unexpected Harness SDK server');
+        // This is a required future extension, NOT a field promised by the
+        // currently installed upstream SDK. Missing information fails closed.
+        if (hello?.actualRoute?.provider !== job.config.provider || hello?.actualRoute?.model !== job.config.model) throw Error('Actual provider/model is missing or differs from the approved route; no prompt sent');
         emit({ kind: 'log', text: `Harness SDK ${hello.serverInfo.version}; requested ${job.config.provider}/${job.config.model}` });
         const accepted = await rpc.request('session/prompt', { sessionId, contentBlocks: [{ type: 'text', text: handoffPrompt(job) }] }, launch.receiptTimeoutMs ?? 15_000);
         if (typeof accepted?.messageId !== 'string' || !accepted.messageId) throw Error('Missing durable enqueue receipt');
@@ -82,3 +91,11 @@ export class DshAdapter implements AgentAdapter {
     return { done, stop: async () => { stopped = true; fail(Error('Cancelled by user')); await rpc.close(); } };
   }
 }
+
+export class DshAdapter extends DshTransport {
+  override validate(config: ProjectConfig, launch: LaunchConfig): void {
+    super.validate(config, launch);
+    throw Error('DeepSeek automatic dispatch disabled: this SDK has no verified filesystem/network/tool isolation and no actual-model attestation. Checkpoint retained. No receiver was started.');
+  }
+}
+export default new DshAdapter();

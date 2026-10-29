@@ -14,7 +14,7 @@ const definitions = [
   ['status', 'Read live relay status and persisted results. No model calls are made.', { jobId: string }, []],
   ['finish', 'Mark a task complete only after its acceptance criteria are met; suppress future handoff.', { taskId: string }, ['taskId']],
   ['task_state', 'Pause, await user input, or resume an undispatched execution task. Never resume Plan mode autonomously.', { taskId: string, state: { type: 'string', enum: ['active','paused','waiting_user','completed'] } }, ['taskId','state']],
-  ['verify', 'Record actual external result verification with evidence, separately from the Agent self-report.', { jobId: string, passed: { type: 'boolean' }, evidence: array }, ['jobId','passed','evidence']],
+  ['verify', 'Record supplied evidence only. This does not execute acceptance commands or certify acceptance.', { jobId: string, evidence: array }, ['jobId','evidence']],
 ] as const;
 export const mcpTools = definitions.map(([name, description, properties, required]) => ({ name: `relay_${name}`, description,
   inputSchema: { type: 'object', properties, required, additionalProperties: false },

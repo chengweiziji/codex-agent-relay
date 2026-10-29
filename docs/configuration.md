@@ -2,9 +2,9 @@
 
 ## Project configuration
 
-Run `node src/cli.ts setup` or use the plugin Setup action to open the first-time settings page. It accepts the project and Harness locations, a user-selected provider/model, threshold and credential environment-variable name. Saving does not register a task or call a model. Configured projects are kept in a local project index so their model settings are available before the first chat task.
+Run `node src/cli.ts setup` or use the plugin Setup action to open the first-time settings page. It accepts the project and Harness locations, a user-selected provider/model, threshold and credential environment-variable name. Saving requires an explicit confirmation of the data disclosure; it does not register a task or call a model. Configured projects are kept in a local project index so their model settings are available before the first chat task. Handoff also requires a local secret scanner, `gitleaks` by default; configure `scanner` in `user.json` to use a reviewed alternative.
 
-The nearest ancestor `.agent-relay.json` is used, starting at the session cwd. Real paths are resolved; Windows directory identity is case-insensitive. Different worktrees/cwds have separate execution ownership.
+Approval is stored in `<relay-home>/trusted-projects.json`, keyed by a hash of the canonical project path. Each record contains the approved configuration, a configuration fingerprint and a launch fingerprint covering the selected Agent launch, adapter module and scanner. A repository or parent-directory `.agent-relay.json` is not trusted and is ignored; nested directories do not inherit an enabled project. Real paths are resolved and Windows directory identity is case-insensitive. Different worktrees/cwds have separate execution ownership. Editing a launch, adapter module or scanner in `user.json` revokes the project approval until the configuration is explicitly saved again.
 
 | Field | Meaning |
 |---|---|
@@ -17,21 +17,31 @@ The nearest ancestor `.agent-relay.json` is used, starting at the session cwd. R
 
 Project config carries no command or credential. Unknown fields are rejected. Configuration is snapshotted into each dispatched job; later changes cannot change its model.
 
+If an approval is revoked, the settings page clears the prior target and requires a fresh selection; it never reuses another project's fields. Saving is disabled while loading, and a late response for a previously selected project is ignored.
+
 ## User configuration
 
-Default relay home: `~/.codex-agent-relay`; override with `AGENT_RELAY_HOME`. It stores `user.json`, the private service endpoint/token, state and event logs. Protect this directory as local task data. Share neither dashboard capability URLs nor the state directory.
+Default relay home: `~/.codex-agent-relay`; override with `AGENT_RELAY_HOME`. It stores `user.json`, project approval records, the private service endpoint/token, state and event logs. Protect this directory as local task data. Share neither dashboard capability URLs nor the state directory.
 
-`user.json` accepts `codex`, `agents`, and optional `adapterModules`. Each launch has `command`, an argument array, optional nonsecret `env` and `envFrom` environment-variable references. Arguments are passed with `shell: false`. Prefer a real executable (`node` plus the installed DSH JS CLI) on Windows instead of a `.cmd` wrapper. No shell command construction is used for Agent prompts.
+`user.json` accepts `codex`, `agents`, optional `adapterModules`, optional `scanner` and `retentionDays`. Each launch has `command`, an argument array, optional nonsecret `env` and `envFrom` environment-variable references. Arguments are passed with `shell: false`. Prefer a real executable (`node` plus the installed DSH JS CLI) on Windows instead of a `.cmd` wrapper. No shell command construction is used for Agent prompts.
 
-The shipped DSH adapter uses the documented stdio JSON-RPC SDK profile directly: `initialize`, `session/prompt`, `session.event`, `session.status`. It does not depend on an undocumented web endpoint or control the Agent's GUI. The receiver writes its own durable session history under its configured Harness home. Configure an appropriate Harness sandbox/profile; this relay never selects `sdk-minimal` or grants full-access flags for convenience.
+Receivers do not inherit the full service environment. They get a fixed allowlist of runtime variables (`PATH`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, proxy variables), explicit `env` entries and `envFrom` references. Injection variables (`NODE_OPTIONS`, `NODE_PATH`, `LD_*`, `DYLD_*`, `PYTHONPATH`) are rejected. `HOME` and `USERPROFILE` are not inherited by receivers by default; set an explicit non-secret path in that launch's `env` if the receiver needs one. See [security and data handling](security.md).
 
-The service and receiver inherit process environment at startup. Configure credentials in the environment that launches Codex/the service, or through supported Harness credentials. Do not place actual secrets in `env`, scripts or committed files. Redaction is defense in depth, not a guarantee that arbitrary task text contains no secrets.
+The shipped DSH transport uses the documented stdio JSON-RPC SDK profile directly: `initialize`, `session/prompt`, `session.event`, `session.status`. It does not depend on an undocumented web endpoint or control the Agent's GUI. The receiver writes its own durable session history under its configured Harness home. Configure an appropriate Harness sandbox/profile; this relay never selects `sdk-minimal` or grants full-access flags for convenience.
+
+The shipped `deepseek-harness` adapter validates the transport contract but refuses real dispatch: the SDK does not provide verified filesystem/network/tool isolation, and the installed SDK does not attest the actual provider/model. A custom, user-installed adapter is required for real execution; it is trusted code and must implement its own isolation and route checks. The demo fixture exercises the full event path without a model call.
+
+Configure credentials in the environment that launches Codex/the service, or through supported Harness credentials. Do not place actual secrets in `env`, scripts or committed files. Redaction is defense in depth, not a guarantee that arbitrary task text contains no secrets; the pre-dispatch scanner is the blocking control.
+
+`retentionDays` defaults to 7 and accepts 1–30. Expired event logs and resolved job content are removed; a job with an unresolved recovery fence keeps a minimal ownership record so the workspace is not silently unlocked. `state.json` stores checkpoint summaries and hashes, not full instructions or full checkpoints; after a service restart, a task must provide a fresh checkpoint before handoff.
+
+Cleanup has its own 30-second timer and does not depend on an active task or a successful quota request. A stopped service cleans overdue data at its next startup. Preflight uses a frozen payload and bundled Gitleaks rules; a content or launch change during scanning rejects that handoff attempt.
 
 ## Lifecycle
 
 Tasks: `active → handed_off` or `completed`; `paused`, `waiting_user`, and `handoff_failed` are explicit non-dispatch states. Stops/interrupts pause undispatched work. The user must authorize continuation; the skill can then set it active.
 
-Jobs: `preparing → accepted/running → ended | waiting_user | failed | cancelled`. The SDK may send a running notification before its receipt, so events are persisted in arrival order without treating running as accepted. A final result can self-report completion, but only an explicit evidence-bearing verification changes the verification label.
+Jobs: `preparing → accepted/running → ended | waiting_user | failed | cancelled`. The SDK may send a running notification before its receipt, so events are persisted in arrival order without treating running as accepted. A final result can self-report completion. `relay_verify` only records user-supplied evidence; it does not execute acceptance commands, change a job to passed, or certify acceptance. Inspect the files and tests yourself.
 
 A failed or uncertain job is never automatically retried. On service restart, previously live jobs get a recovery fence. Inspect the former runtime and any spawned background jobs, then acknowledge with:
 

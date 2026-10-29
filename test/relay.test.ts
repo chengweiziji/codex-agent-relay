@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DshTransport } from '../src/adapters/dsh.ts';
 import { Relay } from '../src/relay.ts';
 import { QuotaReader, remaining } from '../src/quota.ts';
-import { saveProject, atomicJSON, readJSON, validateCheckpoint, redact, rejectSecrets } from '../src/config.ts';
+import { saveProject, atomicJSON, readJSON, findProject, validateCheckpoint, redact, rejectSecrets } from '../src/config.ts';
 import { startServer } from '../src/server.ts';
 import { JsonRpc } from '../src/rpc.ts';
 import type { ProjectConfig, Checkpoint, QuotaSnapshot } from '../src/types.ts';
@@ -19,14 +20,14 @@ function quota(used:number):QuotaSnapshot{return {at:Date.now(),data:{rateLimits
 async function setup(t:any,model='fixture'){
   const dir=mkdtempSync(join(tmpdir(),'relay-test-'));const project=join(dir,'project');mkdirSync(project);
   const home=join(dir,'home');const count=join(dir,'count.txt');
-  saveProject(project,{...baseConfig,model});
-  atomicJSON(join(home,'user.json'),{agents:{'deepseek-harness':{command:process.execPath,args:[fixture,'--profile','sdk'],env:{RELAY_TEST_COUNT:count},initializeTimeoutMs:1000,receiptTimeoutMs:250,runTimeoutMs:1500}}});
-  const q=new FakeQuota();q.snapshot=quota(96);const relay=new Relay(home,q);
+  atomicJSON(join(home,'user.json'),{scanner:{command:process.execPath,args:[fileURLToPath(new URL('./fixtures/scanner.mjs',import.meta.url))]},agents:{'deepseek-harness':{command:process.execPath,args:[fixture,'--profile','sdk'],env:{RELAY_TEST_COUNT:count},initializeTimeoutMs:1000,receiptTimeoutMs:250,runTimeoutMs:1500}}});
+  saveProject(project,{...baseConfig,model},home);
+  const q=new FakeQuota();q.snapshot=quota(96);const relay=new Relay(home,q);relay.adapters.set('deepseek-harness',new DshTransport());
   t.after(async()=>{await relay.close();rmSync(dir,{recursive:true,force:true})});
   const task=await relay.register({cwd:project,sessionId:'test-session',checkpoint});
   return {relay,task,project,home,q,count,dir};
 }
-async function settle(relay:Relay,id:string){for(let i=0;i<200;i++){if(!relay.runs.has(id))return relay.job(id);await new Promise(r=>setTimeout(r,10))}throw Error('Job did not finish')}
+async function settle(relay:Relay,id:string){for(let i=0;i<1200;i++){if(!relay.runs.has(id))return relay.job(id);await new Promise(r=>setTimeout(r,10))}throw Error('Job did not finish')}
 test('quota uses relevant bucket and the most constrained live window',()=>{
   const s=quota(60);s.data.rateLimitsByLimitId.codex.secondary.usedPercent=99;
   assert.equal(remaining(s,'codex'),1);assert.equal(remaining(s,'missing'),null);
@@ -87,7 +88,7 @@ test('same workspace cannot run two external owners',async t=>{
 });
 test('workspace ownership also fences unregistered chats and disabled projects',async t=>{
   const {relay,task,project}=await setup(t,'hang');const job=await relay.handoff({taskId:task.id,instruction:'Continue'});
-  saveProject(project,{...baseConfig,enabled:false});
+  saveProject(project,{...baseConfig,enabled:false},relay.home);
   const h={cwd:project,session_id:'unregistered',hook_event_name:'PreToolUse',tool_name:'apply_patch'};
   assert.equal((await relay.hook(h)).hookSpecificOutput.permissionDecision,'deny');
   assert.equal((await relay.hook({...h,session_id:task.sessionId})).hookSpecificOutput.permissionDecision,'deny');
@@ -98,11 +99,11 @@ for(const change of ['pause','disable','operation'] as const)test(`handoff reche
   let release!:()=>void; q.refresh=async()=>{await new Promise<void>(r=>{release=r});return q.snapshot};
   const pending=relay.handoff({taskId:task.id,instruction:'Continue'});
   if(change==='pause')relay.setState(task.id,'paused');
-  if(change==='disable')saveProject(project,{...baseConfig,enabled:false});
+  if(change==='disable')saveProject(project,{...baseConfig,enabled:false},relay.home);
   if(change==='operation')task.inFlight.push('new-operation');
   release();await assert.rejects(pending,/active|disabled|operations/);assert.equal(relay.jobs.length,0);
 });
-for(const [model,pattern] of [['invalid',/Unavailable/],['no-receipt',/timeout/],['crash',/exited/]] as const)test(`${model} is a failed handoff or run, not success`,async t=>{
+for(const [model,pattern] of [['invalid',/Unavailable/],['no-receipt',/timeout/],['crash',/exited/],['hang',/deadline/],['wrong-route',/provider\/model/],['no-route',/provider\/model/]] as const)test(`${model} is a failed handoff or run, not success`,async t=>{
   const {relay,task}=await setup(t,model);const job=await relay.handoff({taskId:task.id,instruction:'Continue'});await settle(relay,job.id);
   assert.equal(job.state,'failed');assert.match(job.error!,pattern);assert.equal(job.reportedComplete,false);
 });
@@ -110,8 +111,8 @@ test('waiting-user result is explicit',async t=>{const {relay,task}=await setup(
 test('model config updates affect only the next job and remain project-local',async t=>{
   const {relay,task,project,dir}=await setup(t);const job=await relay.handoff({taskId:task.id,instruction:'Continue'});
   relay.config(project,{...baseConfig,model:'next-model'});assert.equal(job.config.model,'fixture');
-  const second=join(dir,'other');mkdirSync(second);saveProject(second,{...baseConfig,model:'other-model'});
-  assert.equal(readJSON<any>(join(second,'.agent-relay.json')).model,'other-model');
+  const second=join(dir,'other');mkdirSync(second);saveProject(second,{...baseConfig,model:'other-model'},relay.home);
+  assert.equal(findProject(second,relay.home)!.config.model,'other-model');
 });
 test('restart retains receipts and never resends or resumes tasks',async t=>{
   const {relay,task,home,q}=await setup(t);const job=await relay.handoff({taskId:task.id,instruction:'Continue'});await settle(relay,job.id);
@@ -125,7 +126,7 @@ test('history remains readable after a former workspace is removed',async t=>{
 });
 test('interrupted runtime remains fenced on restart until explicit recovery evidence',async t=>{
   const {relay,task,home,q,project}=await setup(t,'hang');const job=await relay.handoff({taskId:task.id,instruction:'Continue'});
-  const restarted=new Relay(home,q);t.after(()=>restarted.close());
+  const restarted=new Relay(home,q);restarted.adapters.set('deepseek-harness',new DshTransport());t.after(()=>restarted.close());
   assert.equal(restarted.job(job.id).recoveryRequired,true);
   assert.equal((await restarted.hook({cwd:project,session_id:'new',hook_event_name:'PreToolUse',tool_name:'Bash'})).hookSpecificOutput.permissionDecision,'deny');
   const next=await restarted.register({cwd:project,sessionId:'new',checkpoint});
@@ -157,4 +158,29 @@ test('MCP server exposes tools with valid schemas',async t=>{
   const rpc=new JsonRpc({command:process.execPath,args:[fileURLToPath(new URL('../src/cli.ts',import.meta.url)),'mcp']});t.after(()=>rpc.close());
   const init=await rpc.request('initialize',{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'test',version:'1'}});assert.equal(init.serverInfo.name,'codex-agent-relay');
   const tools=await rpc.request('tools/list');assert.ok(tools.tools.some((x:any)=>x.name==='relay_handoff'));assert.ok(tools.tools.some((x:any)=>x.name==='relay_setup'));assert.equal(tools.tools.length,8);
+});
+
+test('idle before turn/end completes without timing out',async t=>{const {relay,task}=await setup(t,'idle-first');const job=await relay.handoff({taskId:task.id,instruction:'Continue'});await settle(relay,job.id);assert.equal(job.state,'ended')});
+
+for(const change of ['checkpoint','empty-remaining','instruction','launch'] as const)test(`preflight rejects ${change} changes after the payload scan`,async t=>{
+  const {relay,task,home,project,dir,count}=await setup(t);
+  const user=readJSON<any>(join(home,'user.json'));
+  const signal=join(dir,'scan-ready'),release=join(dir,'scan-release'),capture=join(dir,'scanned.json');
+  user.scanner.env={RELAY_SCAN_SIGNAL:signal,RELAY_SCAN_RELEASE:release,RELAY_SCAN_CAPTURE:capture};
+  atomicJSON(join(home,'user.json'),user);saveProject(project,baseConfig,home);
+  const input={taskId:task.id,instruction:'Original instruction'};
+  const pending=relay.handoff(input).then(job=>({job,error:undefined}),error=>({job:undefined,error}));
+  try{
+    for(let i=0;i<500&&!existsSync(signal);i++)await new Promise(r=>setTimeout(r,10));
+    assert.ok(existsSync(signal),'scanner reached the directory phase');
+    if(change==='checkpoint')relay.checkpoint({taskId:task.id,checkpoint:{...checkpoint,decisions:['unscanned replacement']}});
+    if(change==='empty-remaining')relay.checkpoint({taskId:task.id,checkpoint:{...checkpoint,remaining:[]}});
+    if(change==='instruction')input.instruction='unscanned replacement';
+    if(change==='launch'){
+      user.agents['deepseek-harness'].runTimeoutMs=5000;atomicJSON(join(home,'user.json'),user);saveProject(project,baseConfig,home);
+    }
+  }finally{writeFileSync(release,'continue')}
+  const result=await pending;assert.match(result.error?.message||'',/changed during secret scan/);
+  assert.equal(relay.jobs.length,0);assert.equal(task.jobId,undefined);assert.equal(existsSync(count),false);
+  assert.ok(!readFileSync(capture,'utf8').includes('unscanned replacement'));
 });

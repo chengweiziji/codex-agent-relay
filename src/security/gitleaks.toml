@@ -1,0 +1,4 @@
+# Use the scanner's built-in rules. Never extend a project's configuration.
+title = "Agent Relay mandatory secret scan"
+[extend]
+useDefault = true

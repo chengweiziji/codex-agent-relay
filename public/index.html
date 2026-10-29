@@ -2,7 +2,7 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Agent Relay</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body><main>
   <header><div class="brand"><span class="mark">↗</span><div><strong>Agent Relay</strong><small>CODEX → YOUR NEXT AGENT</small></div></div><span id="connection" class="connection">连接中</span></header>
-  <section class="intro"><p class="eyebrow">CODEX AGENT RELAY</p><h1>额度交接</h1><p class="muted">Codex 整理剩余工作，你选择的 Agent 接着执行。进度和结果保存在本机。</p></section>
+  <section class="intro"><p class="eyebrow">CODEX AGENT RELAY</p><h1>额度交接</h1><p class="muted">Codex 整理剩余工作，你选择的 Agent 接着执行。控制服务运行在本机；模型调用可能发送任务内容到外部服务。真实自动派发目前暂停。</p></section>
   <div id="error" role="alert" hidden></div>
   <section class="card overview"><div><span class="label">当前执行状态</span><h2 id="state">等待任务</h2><p id="route" class="muted">在已配置的项目中开始一个执行任务。</p></div><span id="quota" class="quota">—<small>Codex 剩余</small></span></section>
   <nav aria-label="页面"><button id="live-tab" class="tab selected">进度 / Progress</button><button id="settings-tab" class="tab">设置 / Settings</button></nav>
@@ -13,13 +13,13 @@
       <div class="phase-row"><span>01 整理交接</span><span>02 对方接收</span><span>03 执行结果</span></div>
       <section class="card"><div class="section-title"><h3 id="goal">任务</h3><button id="stop" class="danger" hidden>停止执行</button></div><p id="metadata" class="muted mono"></p><details><summary>查看交接指令与上下文</summary><pre id="brief"></pre></details></section>
       <section class="card"><div class="section-title"><h3>活动记录</h3><span id="stream-state" class="muted">等待事件</span></div><ol id="events" class="timeline" aria-live="polite"></ol></section>
-      <section class="card"><div class="section-title"><h3>最终结果</h3><span id="verification" class="badge">尚未验收</span></div><pre id="result">等待接收 Agent 返回结果。</pre><button id="download-result" class="quiet">保存结果 / Save .md</button></section>
+      <section class="card"><div class="section-title"><h3>最终结果</h3><span id="verification" class="badge">未记录证据</span></div><pre id="result">等待接收 Agent 返回结果。</pre><button id="download-result" class="quiet">保存结果 / Save .md</button></section>
     </section>
     <div id="empty" class="empty"><span>⇄</span><h3>准备好接力了</h3><p>Codex 在额度将尽时发送交接指令。<br>接收回执、过程和结果会留在这里。</p></div>
   </div>
   <div id="settings-view" hidden>
     <section class="card" id="existing-settings"><div class="section-title"><h3>Agent 与模型 / Target</h3><button id="add-project" class="quiet">添加项目 / Add project</button></div><p class="muted">修改从下一次交接生效。Changes apply to the next handoff.</p>
-      <form id="config-form"><label>项目 / Project<select id="project" required></select></label><label>接收 Agent / Agent<select id="agent" required></select></label><label>Provider<input id="provider" required autocomplete="off"></label><label>模型 / Model<input id="model" required autocomplete="off" placeholder="Model ID"></label><div class="form-row"><label>剩余阈值 / Threshold %<input id="threshold" type="number" min="0.1" max="50" step="0.1" required></label><label>额度分组 / Quota bucket<input id="bucket" required></label></div><label class="checkbox"><input type="checkbox" id="enabled">启用自动交接 / Enable relay</label><button class="primary" type="submit">保存 / Save</button><p id="saved" role="status" class="muted"></p></form>
+      <form id="config-form"><label>项目 / Project<select id="project" required></select></label><label>接收 Agent / Agent<select id="agent" required></select></label><label>Provider<input id="provider" required autocomplete="off"></label><label>模型 / Model<input id="model" required autocomplete="off" placeholder="Model ID"></label><div class="form-row"><label>剩余阈值 / Threshold %<input id="threshold" type="number" min="0.1" max="50" step="0.1" required></label><label>额度分组 / Quota bucket<input id="bucket" required></label></div><label class="checkbox"><input type="checkbox" id="enabled">启用 Relay / Enable relay</label><button class="primary" type="submit">保存 / Save</button><p id="saved" role="status" class="muted"></p></form>
     </section>
     <section class="card" id="setup-card"><h3>首次设置 / First-time setup</h3><p class="muted">选好接收方并保存。此操作不启动任务、不调用模型。Saving does not start a task or model call.</p>
       <form id="setup-form">
@@ -34,8 +34,8 @@
         <button class="primary" type="submit">保存并启用此项目 / Save and enable</button>
         <p id="setup-result" role="status" class="muted"></p>
       </form>
-      <p class="muted small-note">还需要在 Codex 安装插件并审核、信任 Hooks。Install the plugin and review/trust its Hooks in Codex.</p>
+      <p class="muted small-note">还需要在 Codex 安装插件并审核、信任 Hooks。交接前还需要本机 gitleaks，或在 user.json 的 scanner 中配置经过审核的扫描器。Install the plugin and review/trust its Hooks; handoff also requires a local scanner.</p>
     </section>
   </div>
-  <footer><span>LOCAL FIRST · NO CLOUD RELAY</span><span>v0.1.0</span></footer>
+  <footer><span>LOCAL CONTROL · MODEL REQUESTS MAY LEAVE THIS DEVICE</span><span>v0.1.0</span></footer>
 </main></body></html>

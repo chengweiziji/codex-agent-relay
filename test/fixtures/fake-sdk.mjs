@@ -8,7 +8,7 @@ for await(const line of createInterface({input:process.stdin})){
   if(m.method==='initialize'){
     model=m.params.model;
     if(model==='invalid'){send({id:m.id,error:{code:-32602,message:'Unavailable exact model'}});continue}
-    send({id:m.id,result:{serverInfo:{name:'deepseek-harness-sdk-runtime',version:'fixture'}}});
+    send({id:m.id,result:{serverInfo:{name:'deepseek-harness-sdk-runtime',version:'fixture'},...(model==='no-route'?{}:{actualRoute:{provider:m.params.provider,model:model==='wrong-route'?'fallback':model}})}});
   }else if(m.method==='session/prompt'){
     if(process.env.RELAY_TEST_COUNT)appendFileSync(process.env.RELAY_TEST_COUNT,'prompt\n');
     const sessionId=m.params.sessionId;
@@ -20,7 +20,9 @@ for await(const line of createInterface({input:process.stdin})){
     setTimeout(()=>{
       notify('session.event',{sessionId,event:{type:'tool/call',data:{}}});
       notify('session.event',{sessionId,event:{type:'assistant/message',data:{message:{content:[{type:'text',text:model==='waiting'?'Need a decision.\nRELAY_STATUS: waiting_user':'Fixture completed.\nRELAY_STATUS: completed'}]}}}});
+      if(model==='idle-first')notify('session.status',{sessionId,status:'idle'});
       notify('session.event',{sessionId,event:{type:'turn/end',data:{reason:{kind:'completed'}}}});
+      if(model==='idle-first')return;
       notify('session.status',{sessionId,status:'idle'});
     },Number(process.env.RELAY_TEST_DELAY||60));
   }else if(m.method==='shutdown'){send({id:m.id,result:{}});process.exit(0)}

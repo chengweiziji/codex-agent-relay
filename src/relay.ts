@@ -2,12 +2,14 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { join, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
-import { atomicJSON, canonical, pathKey, findProject, readJSON, readUser, redact, rejectSecrets, validateCheckpoint, saveProject } from './config.ts';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { atomicJSON, canonical, pathKey, findProject, readJSON, readUser, redact, rejectSecrets, validateCheckpoint, saveProject, digest } from './config.ts';
 import { QuotaReader, remaining } from './quota.ts';
 import { DshAdapter } from './adapters/dsh.ts';
 import { projectPaths, rememberProject } from './setup.ts';
 import type { Task, Job, RelayEvent, AgentAdapter, AgentRun, QuotaSnapshot, AdapterEvent, TaskState } from './types.ts';
+
+import { persistedState, sanitize, scanSecrets } from './privacy.ts';
 
 const liveStates = new Set(['preparing','accepted','running']);
 const safeTool = (name: string) => /(?:^|__)relay_(?:setup|register|checkpoint|handoff|status|finish|task_state|verify)$/.test(name) || /(?:open_in_codex|request_user_input|wait)$/.test(name);
@@ -19,6 +21,7 @@ export class Relay extends EventEmitter {
   launches = new Map<string, Promise<Job>>();
   quota: QuotaReader;
   timer?: NodeJS.Timeout;
+  retentionTimer?: NodeJS.Timeout;
   adapters = new Map<string, AgentAdapter>([['deepseek-harness', new DshAdapter()]]);
   baseUrl = '';
   token = '';
@@ -28,7 +31,7 @@ export class Relay extends EventEmitter {
     const saved = readJSON<{ tasks: Task[]; jobs: Job[] }>(join(home, 'state.json'), { tasks: [], jobs: [] });
     this.tasks = saved.tasks; this.jobs = saved.jobs;
     for (const job of this.jobs) if (liveStates.has(job.state)) { job.state = 'failed'; job.recoveryRequired = true; job.error = 'Relay restarted; previous execution state is unknown. Inspect existing processes before retrying. No task was resent.'; }
-    for (const task of this.tasks) { task.inFlight = []; if (task.state === 'active') task.state = 'paused'; }
+    for (const task of this.tasks) { task.inFlight = []; task.checkpointFresh = false; if (task.state === 'active') task.state = 'paused'; }
     this.quota = quota || new QuotaReader(readUser(home).codex);
     this.save();
   }
@@ -40,11 +43,23 @@ export class Relay extends EventEmitter {
       this.adapters.set(name, adapter);
     }
   }
-  save(): void { atomicJSON(join(this.home, 'state.json'), { tasks: this.tasks, jobs: this.jobs }); this.emit('change'); }
+  save(): void {
+    const days = readUser(this.home).retentionDays ?? 7;
+    if (!Number.isFinite(days) || days < 1 || days > 30) throw Error('retentionDays must be between 1 and 30');
+    const cutoff = Date.now() - days * 86400000;
+    const expired = new Set(this.jobs.filter(j => !liveStates.has(j.state) && !this.runs.has(j.id) && Date.parse(j.updatedAt) < cutoff).map(j => j.id));
+    for (const id of expired) if (/^[a-f0-9-]{36}$/.test(id)) rmSync(join(this.home, 'events', id + '.jsonl'), { force: true });
+    for (const j of this.jobs) if (expired.has(j.id) && j.recoveryRequired) { j.result = undefined; j.verification = null; j.instruction = '[Expired]'; j.checkpoint = { ...j.checkpoint, goal: '[Expired]', completed: [], remaining: [], decisions: [], files: [], tests: [], processes: [], acceptance: [], permissions: '' }; }
+    this.jobs = this.jobs.filter(j => !expired.has(j.id) || j.recoveryRequired);
+    this.tasks = this.tasks.filter(t => !(t.jobId && expired.has(t.jobId) && !this.jobs.some(j => j.id === t.jobId)) && (t.state === 'active' || !!t.jobId || Date.parse(t.updatedAt) >= cutoff));
+    atomicJSON(join(this.home, 'state.json'), persistedState(this.tasks, this.jobs)); this.emit('change');
+  }
   event(job: Job, kind: string, text: string): void {
     const events = this.events(job.id);
-    const item: RelayEvent = { seq: (events.at(-1)?.seq || 0) + 1, at: new Date().toISOString(), kind, text: redact(text).slice(0, 100_000) };
-    appendFileSync(join(this.home, 'events', `${job.id}.jsonl`), JSON.stringify(item) + '\n', { mode: 0o600 });
+    const item: RelayEvent = { seq: (events.at(-1)?.seq || 0) + 1, at: new Date().toISOString(), kind, text: redact(text).slice(0, 8_000) };
+    const eventPath = join(this.home, 'events', `${job.id}.jsonl`);
+    try { if (statSync(eventPath).size > 2_000_000) return; } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+    appendFileSync(eventPath, JSON.stringify(item) + '\n', { mode: 0o600 });
     this.emit('event', job.id, item);
   }
   events(id: string): RelayEvent[] {
@@ -56,7 +71,7 @@ export class Relay extends EventEmitter {
   job(id: string): Job { const job = this.jobs.find(j => j.id === id); if (!job) throw Error('Unknown job'); return job; }
   taskForSession(session: string, cwd: string): Task | undefined { return this.tasks.findLast(t => t.sessionId === session && pathKey(t.cwd) === pathKey(cwd)); }
   async register(input: any): Promise<Task> {
-    const project = findProject(input.cwd);
+    const project = findProject(input.cwd, this.home);
     if (!project?.config.enabled) throw Error('Project relay is not enabled');
     rememberProject(this.home, project.root);
     if (typeof input.sessionId !== 'string' || !input.sessionId) throw Error('sessionId is required');
@@ -67,14 +82,14 @@ export class Relay extends EventEmitter {
       return previous;
     }
     const task: Task = { id: randomUUID(), sessionId: input.sessionId, cwd: canonical(input.cwd), project: project.root,
-      mode: input.mode || 'default', state: input.mode === 'plan' ? 'paused' : 'active', checkpoint, updatedAt: new Date().toISOString(), inFlight: [] };
+      mode: input.mode || 'default', state: input.mode === 'plan' ? 'paused' : 'active', checkpoint, updatedAt: new Date().toISOString(), inFlight: [], checkpointFresh: true };
     this.tasks.push(task); this.save(); await this.refresh(); return task;
   }
   checkpoint(input: any): Task {
     const task = this.task(input.taskId);
     if (task.jobId) throw Error('Dispatched task content is immutable');
     const checkpoint = validateCheckpoint(input.checkpoint); rejectSecrets(checkpoint);
-    task.checkpoint = checkpoint; task.updatedAt = new Date().toISOString();
+    task.checkpoint = checkpoint; task.checkpointFresh = true; task.updatedAt = new Date().toISOString();
     // Background work must be identified explicitly, with evidence in the checkpoint.
     if (input.backgroundToolIds?.length) {
       if (!checkpoint.processes.length) throw Error('Record background process IDs and inspection evidence first');
@@ -91,19 +106,26 @@ export class Relay extends EventEmitter {
     task.updatedAt = new Date().toISOString(); this.save(); return task;
   }
   async refresh(): Promise<QuotaSnapshot> {
-    if (!this.tasks.some(t => t.state === 'active' && t.mode !== 'plan')) return this.quota.snapshot;
+    if (!this.tasks.some(t => t.state === 'active' && t.mode !== 'plan')) { this.save(); return this.quota.snapshot; }
     const snapshot = await this.quota.refresh();
     for (const task of this.tasks) {
       if (task.state !== 'active') continue;
-      const project = findProject(task.cwd);
+      const project = findProject(task.cwd, this.home);
       if (project?.config.enabled && remaining(snapshot, project.config.quotaBucket) === 0 && !task.jobId) {
         task.state = 'handoff_failed'; task.handoffError = 'Codex quota exhausted before a confirmed handoff. Checkpoint retained; no task was sent.';
       }
     }
     this.save(); return snapshot;
   }
-  startMonitor(): void { this.timer = setInterval(() => { void this.refresh().catch(e => this.emit('diagnostic', redact(String(e)))); }, 30_000); }
-  quotaFor(task: Task): number | null { const p = findProject(task.cwd); return p ? remaining(this.quota.snapshot, p.config.quotaBucket) : null; }
+  startMonitor(): void {
+    if (this.timer || this.retentionTimer) return;
+    this.timer = setInterval(() => { void this.refresh().catch(e => this.emit('diagnostic', redact(String(e)))); }, 30_000);
+    // Retention must run even with no active tasks or a stalled quota request.
+    this.retentionTimer = setInterval(() => {
+      try { this.save(); } catch (e) { this.emit('diagnostic', redact(String(e))); }
+    }, 30_000);
+  }
+  quotaFor(task: Task): number | null { const p = findProject(task.cwd, this.home); return p ? remaining(this.quota.snapshot, p.config.quotaBucket) : null; }
   async handoff(input: any): Promise<Job> {
     const task = this.task(input.taskId);
     const pending = this.launches.get(task.id); if (pending) return pending;
@@ -113,13 +135,14 @@ export class Relay extends EventEmitter {
     try { return await promise; } finally { this.launches.delete(task.id); }
   }
   async beginHandoff(task: Task, input: any): Promise<Job> {
-    let project = findProject(task.cwd);
+    if (task.checkpointFresh === false) throw Error('Provide a fresh checkpoint after service restart');
+    let project = findProject(task.cwd, this.home);
     if (!project?.config.enabled) throw Error('Project relay disabled');
     if (task.state !== 'active' || task.mode === 'plan' || !task.checkpoint.remaining.length) throw Error('Only unfinished, active execution tasks may be handed off');
     if (task.inFlight.length) throw Error(`Wait for tool operations to finish: ${task.inFlight.join(', ')}`);
     await this.refresh();
     // User state, configuration and tool activity may change while quota is being read.
-    project = findProject(task.cwd);
+    project = findProject(task.cwd, this.home);
     if (!project?.config.enabled) throw Error('Project relay disabled');
     if (task.state !== 'active' || task.mode === 'plan' || !task.checkpoint.remaining.length) throw Error('Only unfinished, active execution tasks may be handed off');
     if (task.inFlight.length) throw Error(`Wait for tool operations to finish: ${task.inFlight.join(', ')}`);
@@ -133,11 +156,22 @@ export class Relay extends EventEmitter {
     const launch = readUser(this.home).agents[project.config.agent];
     if (!adapter || !launch) throw Error(`Agent adapter or user launch configuration unavailable: ${project.config.agent}`);
     adapter.validate(project.config, launch);
+    const approvedConfig = JSON.stringify(project.config);
+    const approvedLaunch = digest(launch);
+    const payload = structuredClone({ checkpoint: task.checkpoint, instruction: input.instruction });
+    const checkpointHash = digest(payload.checkpoint);
+    await scanSecrets(task.cwd, payload, readUser(this.home).scanner);
+    project = findProject(task.cwd, this.home);
+    if (!project?.config.enabled || JSON.stringify(project.config) !== approvedConfig || task.state !== 'active' || task.inFlight.length || task.mode === 'plan') throw Error('Task or approved configuration changed during preflight; handoff blocked');
+    if (!task.checkpoint.remaining.length || digest(task.checkpoint) !== checkpointHash || input.instruction !== payload.instruction) throw Error('Checkpoint or instruction changed during secret scan; handoff blocked. Update the checkpoint and retry.');
+    if (digest(readUser(this.home).agents[project.config.agent]) !== approvedLaunch) throw Error('Launch configuration changed during secret scan; handoff blocked');
+    const currentLeft = remaining(this.quota.snapshot, project.config.quotaBucket);
+    if (currentLeft === null || currentLeft <= 0 || currentLeft > project.config.thresholdPercent) throw Error('Quota changed or became unknown during preflight');
     // Recheck after the quota await: another session may have acquired this workspace.
     if (this.jobs.some(j => pathKey(j.cwd) === pathKey(task.cwd) && (liveStates.has(j.state) || this.runs.has(j.id) || j.recoveryRequired))) throw Error('Workspace busy: another managed handoff is running or needs recovery inspection');
     const now = new Date().toISOString();
     const job: Job = { id: randomUUID(), taskId: task.id, project: task.project, cwd: task.cwd, config: structuredClone(project.config),
-      checkpoint: structuredClone(task.checkpoint), instruction: input.instruction, state: 'preparing', createdAt: now, updatedAt: now, reportedComplete: false, verification: null };
+      checkpoint: payload.checkpoint, instruction: payload.instruction, state: 'preparing', createdAt: now, updatedAt: now, reportedComplete: false, verification: null };
     this.jobs.push(job); task.jobId = job.id; task.state = 'handed_off'; this.save();
     this.event(job, 'preparing', `额度即将用尽，开始调用 ${project.config.agent}，模型：${project.config.model}`);
     let acknowledge!: () => void;
@@ -153,22 +187,24 @@ export class Relay extends EventEmitter {
     try {
       const run = adapter.start(job, launch, emit); this.runs.set(job.id, run);
       const finished = run.done.catch((e: any) => {
-        if (job.state !== 'cancelled') { job.state = 'failed'; job.error = redact(e.message); this.event(job, 'failed', job.error!); this.save(); }
+        if (job.state !== 'cancelled') { job.state = 'failed'; job.reportedComplete = false; job.recoveryRequired = true; job.error = redact(e.message); this.event(job, 'failed', job.error!); this.save(); }
       }).finally(() => { this.runs.delete(job.id); });
       await Promise.race([receipt, finished]);
-    } catch (e: any) { job.state = 'failed'; job.error = redact(e.message); this.event(job, 'failed', job.error!); this.save(); }
+    } catch (e: any) { job.state = 'failed'; job.reportedComplete = false; job.recoveryRequired = true; job.error = redact(e.message); this.event(job, 'failed', job.error!); this.save(); }
     return job;
   }
   async stop(id: string): Promise<Job> {
     const job = this.job(id); const run = this.runs.get(id);
     if (!run) throw Error('No owned live runtime; inspect the stored result');
-    job.state = 'cancelled'; this.event(job, 'cancelled', 'Stopped the owned Harness runtime. Inspect any separately launched background processes.'); this.save();
-    await run.stop(); return job;
+    job.state = 'cancelled'; this.event(job, 'cancelled', 'Stop requested for the owned process tree; process isolation is not verified. Inspect detached/background processes before recovery.'); this.save();
+    job.recoveryRequired = true; this.save();
+    try { await run.stop(); } catch (e: any) { job.error = redact(e.message); }
+    this.save(); return job;
   }
   verify(input: any): Job {
     const job = this.job(input.jobId);
-    if (job.state !== 'ended' || typeof input.passed !== 'boolean' || !Array.isArray(input.evidence) || !input.evidence.length || input.evidence.some((s: any) => typeof s !== 'string' || !s.trim())) throw Error('Verification requires an ended job and explicit evidence');
-    rejectSecrets(input.evidence); job.verification = { passed: input.passed, evidence: input.evidence }; this.save(); return job;
+    if (job.state !== 'ended' || !Array.isArray(input.evidence) || !input.evidence.length || input.evidence.some((s: any) => typeof s !== 'string' || !s.trim())) throw Error('Verification requires an ended job and explicit evidence');
+    rejectSecrets(input.evidence); job.verification = { status: 'evidence_recorded', evidence: sanitize(input.evidence) }; this.save(); return job;
   }
   recover(input: any): Job {
     const job = this.job(input.jobId);
@@ -182,7 +218,7 @@ export class Relay extends EventEmitter {
     const tool = h.tool_name || '';
     const owner = this.jobs.find(j => pathKey(j.cwd) === pathKey(h.cwd) && (liveStates.has(j.state) || this.runs.has(j.id) || j.recoveryRequired));
     if (event === 'PreToolUse' && (owner || task?.jobId) && !safeTool(tool)) return { hookSpecificOutput: { hookEventName: event, permissionDecision: 'deny', permissionDecisionReason: 'An external Agent owns this workspace or requires recovery inspection. Check the relay dashboard.' } };
-    const project = findProject(h.cwd);
+    const project = findProject(h.cwd, this.home);
     if (!project?.config.enabled) return {};
     const output = (text: string) => ({ hookSpecificOutput: { hookEventName: event, additionalContext: text } });
     if (!task) {
@@ -210,10 +246,10 @@ export class Relay extends EventEmitter {
   config(project: string, value?: any): any {
     const root = canonical(project);
     if (!this.projects().some(p => pathKey(p) === pathKey(root))) throw Error('Unknown project; use first-time setup before editing settings');
-    if (value) { if (!this.adapters.has(value.agent)) throw Error('Agent adapter is not installed'); rejectSecrets(value); return saveProject(root, value); }
-    return findProject(root)?.config;
+    if (value) { if (!this.adapters.has(value.agent)) throw Error('Agent adapter is not installed'); rejectSecrets(value); return saveProject(root, value, this.home); }
+    return findProject(root, this.home)?.config ?? null;
   }
   projects(): string[] { return [...new Map([...projectPaths(this.home), ...this.tasks.map(t => t.project)].map(p => [pathKey(p), p])).values()]; }
   snapshot(): any { return { tasks: this.tasks.map(t => ({ ...t, remainingPercent: this.quotaFor(t) })), jobs: this.jobs, projects: this.projects(), quota: { at: this.quota.snapshot.at, error: this.quota.snapshot.error }, agents: [...this.adapters.keys()] }; }
-  async close(): Promise<void> { clearInterval(this.timer); await Promise.allSettled([...this.runs.values()].map(r => r.stop())); await this.quota.close(); }
+  async close(): Promise<void> { clearInterval(this.timer); clearInterval(this.retentionTimer); await Promise.allSettled([...this.runs.values()].map(r => r.stop())); await this.quota.close(); }
 }

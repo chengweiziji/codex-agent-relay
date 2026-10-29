@@ -23,8 +23,7 @@ export function setupInfo(home: string): any {
 export function saveSetup(home: string, input: any): any {
   rejectSecrets(input);
   const project = canonical(input.project);
-  const inherited = findProject(project);
-  if (inherited && pathKey(inherited.root) !== pathKey(project)) throw Error('This directory inherits a parent project. Select that project root to edit its configuration.');
+  if (input.confirmed !== true) throw Error('Review the data disclosure and explicitly confirm this project configuration');
   const config = validateProject({ version: 1, enabled: true, agent: 'deepseek-harness', provider: input.provider, model: input.model, thresholdPercent: Number(input.thresholdPercent ?? 5), quotaBucket: input.quotaBucket || 'codex' });
   if (input.agent !== 'deepseek-harness') throw Error('First-time setup supports DeepSeek Harness. Install an adapter before selecting another Agent in project settings.');
   const entry = harnessEntry(input.harnessPath);
@@ -40,7 +39,7 @@ export function saveSetup(home: string, input: any): any {
     env: { ...previous?.env }, envFrom,
   } };
   atomicJSON(join(home, 'user.json'), user);
-  saveProject(project, config); rememberProject(home, project);
+  saveProject(project, config, home); rememberProject(home, project);
   return { project, config, credentialAvailable: credentialEnv ? !!process.env[credentialEnv] : null,
-    next: 'Install and review/trust the plugin Hooks in Codex, then start an execution chat in this project. No task or model call was started.' };
+    next: 'Install and review/trust the plugin Hooks in Codex, then start an execution chat in this project. Automatic real dispatch remains blocked until receiver isolation and actual-model verification are supported. No model call was started.' };
 }

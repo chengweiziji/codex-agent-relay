@@ -22,7 +22,7 @@ export async function action(relay: Relay, name: string, input: any): Promise<an
     case 'stop': result = await relay.stop(input.jobId); break;
     case 'recover': result = relay.recover(input); break;
     case 'hook': return relay.hook(input);
-    case 'config': return relay.config(input.project, input.config);
+    case 'config': if (input.config && input.confirmed !== true) throw Error('User confirmation required for configuration changes'); return relay.config(input.project, input.config);
     default: throw Error('Unknown action');
   }
   return { ...result, dashboardUrl: dashboard(relay, result.taskId ? result.id : undefined) };

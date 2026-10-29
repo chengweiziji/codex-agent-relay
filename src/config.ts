@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve, parse } from 'node:path';
 import { homedir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import type { ProjectConfig, UserConfig, Checkpoint } from './types.ts';
 
 export const defaultHome = () => resolve(process.env.AGENT_RELAY_HOME || join(homedir(), '.codex-agent-relay'));
@@ -29,18 +29,26 @@ export function validateProject(c: any): ProjectConfig {
   if (!Number.isFinite(c.thresholdPercent) || c.thresholdPercent <= 0 || c.thresholdPercent > 50) throw Error('thresholdPercent must be >0 and <=50');
   return structuredClone(c);
 }
-export function findProject(cwd: string): { root: string; config: ProjectConfig } | null {
-  let current: string;
-  try { current = canonical(cwd); } catch (e: any) { if (['ENOENT','ENOTDIR'].includes(e.code)) return null; throw e; }
-  while (true) {
-    const file = join(current, '.agent-relay.json');
-    if (existsSync(file)) return { root: current, config: validateProject(readJSON(file)) };
-    if (current === parse(current).root) return null;
-    current = dirname(current);
-  }
+export const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function projectFingerprint(root: string): string { return digest(pathKey(root)); }
+function launchFingerprint(home: string, agent: string): string {
+  const user = readUser(home);
+  return digest({ launch: user.agents[agent], module: user.adapterModules?.[agent], scanner: user.scanner });
 }
-export function saveProject(root: string, config: unknown): ProjectConfig {
-  const valid = validateProject(config); atomicJSON(join(canonical(root), '.agent-relay.json'), valid); return valid;
+// Repository files are suggestions only. Never inherit parent configuration.
+export function findProject(cwd: string, home = defaultHome()): { root: string; config: ProjectConfig } | null {
+  let root: string;
+  try { root = canonical(cwd); } catch (e: any) { if (['ENOENT','ENOTDIR'].includes(e.code)) return null; throw e; }
+  const record = readJSON<any>(join(home, 'trusted-projects.json'), {})[projectFingerprint(root)];
+  if (!record || record.path !== pathKey(root) || record.launchFingerprint !== launchFingerprint(home, record.config.agent) || record.configFingerprint !== digest(record.config)) return null;
+  return { root, config: validateProject(record.config) };
+}
+// Call only from a deliberate user configuration action, never from hooks or task text.
+export function saveProject(root: string, config: unknown, home = defaultHome()): ProjectConfig {
+  const valid = validateProject(config); rejectSecrets(valid);
+  const records = readJSON<any>(join(home, 'trusted-projects.json'), {});
+  records[projectFingerprint(root)] = { path: pathKey(canonical(root)), config: valid, configFingerprint: digest(valid), launchFingerprint: launchFingerprint(home, valid.agent), approvedAt: new Date().toISOString() };
+  atomicJSON(join(home, 'trusted-projects.json'), records); return valid;
 }
 export function readUser(home: string): UserConfig { return readJSON(join(home, 'user.json'), { agents: {} }); }
 export function validateCheckpoint(c: any): Checkpoint {
@@ -53,7 +61,9 @@ export function validateCheckpoint(c: any): Checkpoint {
   return structuredClone(c);
 }
 export function redact(text: string): string {
-  return text.replace(/\bsk-[A-Za-z0-9_-]{12,}/g, '[REDACTED]')
+  return text.replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16})\b/g, '[REDACTED]')
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}/g, '[REDACTED]')
     .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, '$1[REDACTED]')
     .replace(/((?:api[_-]?key|access[_-]?token|password|secret)\s*[=:]\s*["']?)[^\s,"'}]+/gi, '$1[REDACTED]');
 }

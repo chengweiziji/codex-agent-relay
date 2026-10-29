@@ -23,12 +23,14 @@ test('installed MCP and Hooks work in a path with spaces; execution survives MCP
     for(let i=0;i<30;i++){try{rmSync(dir,{recursive:true,force:true});return}catch(e){if(i===29)throw e;await new Promise(r=>setTimeout(r,100))}}
   });
   execFileSync(process.execPath,[join(root,'scripts','install-local.ts'),'--destination',destination],{cwd:root,windowsHide:true});
-  const config={version:1 as const,enabled:true,agent:'deepseek-harness',provider:'fixture',model:'fixture',thresholdPercent:5,quotaBucket:'codex'};
-  saveProject(project,config);
+  const config={version:1 as const,enabled:true,agent:'fixture',provider:'fixture',model:'fixture',thresholdPercent:5,quotaBucket:'codex'};
   atomicJSON(join(home,'user.json'),{
+    scanner:{command:process.execPath,args:[join(destination,'test','fixtures','scanner.mjs')]},
+    adapterModules:{fixture:join(destination,'test','fixtures','adapter.ts')},
     codex:{command:process.execPath,args:[join(destination,'test','fixtures','fake-codex.mjs')]},
-    agents:{'deepseek-harness':{command:process.execPath,args:[join(destination,'test','fixtures','fake-sdk.mjs'),'--profile','sdk'],env:{RELAY_TEST_DELAY:'1200'},runTimeoutMs:5000}},
+    agents:{fixture:{command:process.execPath,args:[join(destination,'test','fixtures','fake-sdk.mjs'),'--profile','sdk'],env:{RELAY_TEST_DELAY:'1200'},runTimeoutMs:5000}},
   });
+  saveProject(project,config,home);
   const env={...process.env,AGENT_RELAY_HOME:home,PLUGIN_ROOT:destination};
   // The real hook command resolves PLUGIN_ROOT inside Node, so shell expansion cannot corrupt it.
   const hooks=readJSON<any>(join(destination,'hooks','hooks.json'));

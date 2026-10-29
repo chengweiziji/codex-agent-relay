@@ -24,12 +24,14 @@ try {
     }
   } else if (command === 'init') {
     const root = resolve(option('project', process.cwd()));
-    if (existsSync(join(root, '.agent-relay.json'))) throw Error('Project already configured. Use configure.');
+    if (findProject(root)) throw Error('Project already configured. Use configure.');
+    if (!args.includes('--approve')) throw Error('Review data disclosure in docs/security.md, then use --approve or the setup page');
     const model = option('model'); if (!model) throw Error('Specify --model using an available model identifier');
     result = saveProject(root, { version: 1, enabled: true, agent: option('agent','deepseek-harness'), provider: option('provider','deepseek-official'), model, thresholdPercent: Number(option('threshold','5')), quotaBucket: option('bucket','codex') });
     rememberProject(defaultHome(), root);
   } else if (command === 'configure') {
     const root = resolve(option('project', process.cwd())); const p = findProject(root); if (!p) throw Error('Run init first');
+    if (!args.includes('--approve')) throw Error('Configuration changes require --approve after reviewing docs/security.md');
     const next = { ...p.config };
     for (const name of ['agent','provider','model'] as const) if (option(name)) next[name] = option(name);
     if (option('threshold')) next.thresholdPercent = Number(option('threshold'));

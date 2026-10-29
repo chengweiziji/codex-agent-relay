@@ -20,6 +20,8 @@ export interface UserConfig {
   codex?: LaunchConfig;
   agents: Record<string, LaunchConfig>;
   adapterModules?: Record<string, string>;
+  scanner?: LaunchConfig;
+  retentionDays?: number;
 }
 export interface Checkpoint {
   goal: string;
@@ -43,6 +45,7 @@ export interface Task {
   checkpoint: Checkpoint;
   updatedAt: string;
   inFlight: string[];
+  checkpointFresh?: boolean;
   lastTurnId?: string;
   jobId?: string;
   handoffError?: string;
@@ -65,7 +68,7 @@ export interface Job {
   error?: string;
   recoveryRequired?: boolean;
   reportedComplete: boolean;
-  verification: { passed: boolean; evidence: string[] } | null;
+  verification: { status: 'evidence_recorded'; evidence: string[] } | null;
 }
 export interface RelayEvent { seq: number; at: string; kind: string; text: string }
 export interface QuotaSnapshot { at: number; data?: any; error?: string }

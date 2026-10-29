@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, openSync, closeSync, existsSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultHome, readJSON } from './config.ts';
+import { defaultHome, readJSON, readUser } from './config.ts';
+import { childEnv } from './rpc.ts';
 interface Endpoint { pid: number; url: string; token: string }
 export async function ensureServer(home = defaultHome()): Promise<Endpoint> {
   const lookup = async (): Promise<Endpoint | null> => {
@@ -15,9 +16,15 @@ export async function ensureServer(home = defaultHome()): Promise<Endpoint> {
   };
   const existing = await lookup(); if (existing) return existing;
   mkdirSync(home, { recursive: true, mode: 0o700 });
-  const log = openSync(join(home, 'service.log'), 'a', 0o600);
+  const logPath = join(home, 'service.log');
+  if (existsSync(logPath) && (statSync(logPath).size > 1_000_000 || Date.now() - statSync(logPath).mtimeMs > 7 * 86400000)) rmSync(logPath);
+  const log = openSync(logPath, 'a', 0o600);
+  const user = readUser(home);
+  const required = Object.values(user.agents || {}).flatMap(c => Object.values(c.envFrom || {}));
+  const env = childEnv({ command: '', args: [], env: { AGENT_RELAY_HOME: home } });
+  for (const name of [...required, 'CODEX_HOME','HOME','USERPROFILE','APPDATA','LOCALAPPDATA']) if (process.env[name]) env[name] = process.env[name];
   const child = spawn(process.execPath, [fileURLToPath(new URL('./cli.ts', import.meta.url)), 'serve'], {
-    detached: true, windowsHide: true, stdio: ['ignore', log, log], env: { ...process.env, AGENT_RELAY_HOME: home },
+    detached: true, windowsHide: true, stdio: ['ignore', log, log], env,
   });
   child.unref(); closeSync(log);
   for (let i = 0; i < 60; i++) { await new Promise(r => setTimeout(r, 100)); const endpoint = await lookup(); if (endpoint) return endpoint; }
