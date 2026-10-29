@@ -2,6 +2,8 @@
 
 [简体中文](README.zh-CN.md) · [First-time setup](#first-time-setup) · [Verification](docs/verification.md)
 
+[![CI](https://github.com/chengweiziji/codex-agent-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/chengweiziji/codex-agent-relay/actions/workflows/ci.yml)
+
 When Codex is close to its usage limit and your task is unfinished, it sends the remaining work to another Agent on your computer. You choose the receiving Agent and model. Progress and the final answer appear in the right-hand panel of the same Codex window.
 
 After the first setup, handoff is automatic for execution tasks in an enabled project. You do not need to watch the quota or paste instructions into the other Agent.

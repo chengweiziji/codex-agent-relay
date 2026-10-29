@@ -2,6 +2,8 @@
 
 [English](README.md) · [首次设置](#首次设置) · [验证记录](docs/verification.md)
 
+[![CI](https://github.com/chengweiziji/codex-agent-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/chengweiziji/codex-agent-relay/actions/workflows/ci.yml)
+
 Codex 额度快用完、任务还没做完时，把剩余工作交给电脑上的另一个 Agent。接收 Agent 和模型由你选择，执行过程和最终答复显示在同一 Codex 窗口右侧。
 
 完成首次设置后，已启用项目中的执行任务会自动交接，不用一直盯着额度，也不用手动把上下文复制到另一个 Agent。

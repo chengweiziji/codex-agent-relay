@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readJSON, atomicJSON } from '../src/config.ts';
@@ -8,7 +8,7 @@ import { harnessEntry, saveSetup, setupInfo } from '../src/setup.ts';
 import { Relay } from '../src/relay.ts';
 
 function fixture(t:any){
-  const root=mkdtempSync(join(tmpdir(),'relay-setup-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'relay-setup-')));t.after(()=>rmSync(root,{recursive:true,force:true}));
   const home=join(root,'state'),project=join(root,'project'),harness=join(root,'harness');
   mkdirSync(project);mkdirSync(join(harness,'node_modules','@deepseek-ai','dsh','lib'),{recursive:true});
   const entry=join(harness,'node_modules','@deepseek-ai','dsh','lib','bin.js');writeFileSync(entry,'throw Error("Setup must never execute this file");');

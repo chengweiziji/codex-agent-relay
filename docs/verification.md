@@ -22,7 +22,7 @@ Recorded on 2026-10-29 (Asia/Shanghai). This file distinguishes executed checks 
 | Final receiver status | `waiting_user`, not falsely labeled completed |
 | Live production Codex Hooks installation/trust | Not enabled in the user's global configuration during development; hook contract and resolved launcher tested separately |
 | Automatic right-panel opening | Host `open_in_codex` opened the demo in this Codex window; not yet tested as a trusted production plugin workflow |
-| macOS / Linux | CI jobs supplied; no claim that these jobs have run on GitHub before publishing |
+| macOS / Linux | See [live GitHub Actions results](https://github.com/chengweiziji/codex-agent-relay/actions/workflows/ci.yml); real Harness execution was tested only on Windows |
 
 The real run used a disposable two-file project and an explicitly authorized existing credential held in process environment. It used simulated quota to avoid exhausting Codex. No key, raw task history, personal path or private run log is included in the release.
 
