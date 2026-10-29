@@ -42,6 +42,7 @@ async function loadConfig(){if(!$('project').value)return;try{const c=await api(
 $('jobs').onchange=()=>{selected=$('jobs').value;refresh()};$('refresh').onclick=refresh;
 $('live-tab').onclick=()=>{$('live-view').hidden=false;$('settings-view').hidden=true;$('live-tab').classList.add('selected');$('settings-tab').classList.remove('selected')};
 async function openSettings(){
+  settingsLoaded=true;
   $('live-view').hidden=true;$('settings-view').hidden=false;$('settings-tab').classList.add('selected');$('live-tab').classList.remove('selected');
   await loadConfig();
   try{const info=await api('setup_info');$('setup-harness').value=info.harnessPath;$('setup-credential').value=info.credentialEnv;if(!$('setup-project').value)$('setup-project').value=setupProject}catch(e){showError(e)}
