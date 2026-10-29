@@ -23,6 +23,7 @@ if (!provider || !model) throw Error('Set RELAY_SMOKE_PROVIDER and RELAY_SMOKE_M
 const credential = process.env.RELAY_SMOKE_CREDENTIAL || 'DEEPSEEK_API_KEY';
 const credentialTarget = process.env.RELAY_SMOKE_CREDENTIAL_TARGET || 'DEEPSEEK_API_KEY';
 if (!process.env[credential]) throw Error(`Credential environment variable ${credential} is not set.`);
+if (process.env.RELAY_SMOKE_DSH && !existsSync(process.env.RELAY_SMOKE_DSH)) throw Error(`RELAY_SMOKE_DSH does not exist: ${process.env.RELAY_SMOKE_DSH}`);
 
 const repo = join(import.meta.dirname, '..');
 const stamp = Date.now();
@@ -49,6 +50,7 @@ launch.receiptTimeoutMs ??= 60_000;
 launch.runTimeoutMs ??= 600_000;
 
 const dshTemplate = process.env.RELAY_SMOKE_DSH_TEMPLATE;
+if (dshTemplate && !existsSync(dshTemplate)) throw Error(`RELAY_SMOKE_DSH_TEMPLATE does not exist: ${dshTemplate}`);
 if (dshTemplate) {
   const profiles = join(dshTemplate, 'profiles');
   if (existsSync(profiles)) cpSync(profiles, join(dshHome, 'profiles'), { recursive: true });
