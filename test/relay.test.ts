@@ -103,7 +103,7 @@ for(const change of ['pause','disable','operation'] as const)test(`handoff reche
   if(change==='operation')task.inFlight.push('new-operation');
   release();await assert.rejects(pending,/active|disabled|operations/);assert.equal(relay.jobs.length,0);
 });
-for(const [model,pattern] of [['invalid',/Unavailable/],['no-receipt',/timeout/],['crash',/exited/],['hang',/deadline/],['wrong-route',/provider\/model/],['no-route',/provider\/model/]] as const)test(`${model} is a failed handoff or run, not success`,async t=>{
+for(const [model,pattern] of [['invalid',/Unavailable/],['no-receipt',/timeout/],['crash',/exited/],['hang',/deadline/],['wrong-route',/provider\/model/],['no-route',/provider\/model/],['child-route',/provider\/model/],['child-attest',/provider\/model/],['danger',/sandbox mode/],['bad-policy',/approval policy/]] as const)test(`${model} is a failed handoff or run, not success`,async t=>{
   const {relay,task}=await setup(t,model);const job=await relay.handoff({taskId:task.id,instruction:'Continue'});await settle(relay,job.id);
   assert.equal(job.state,'failed');assert.match(job.error!,pattern);assert.equal(job.reportedComplete,false);
 });

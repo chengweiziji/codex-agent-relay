@@ -169,6 +169,7 @@ export class Relay extends EventEmitter {
     if (currentLeft === null || currentLeft <= 0 || currentLeft > project.config.thresholdPercent) throw Error('Quota changed or became unknown during preflight');
     // Recheck after the quota await: another session may have acquired this workspace.
     if (this.jobs.some(j => pathKey(j.cwd) === pathKey(task.cwd) && (liveStates.has(j.state) || this.runs.has(j.id) || j.recoveryRequired))) throw Error('Workspace busy: another managed handoff is running or needs recovery inspection');
+    adapter.preflight?.(task.cwd);
     const now = new Date().toISOString();
     const job: Job = { id: randomUUID(), taskId: task.id, project: task.project, cwd: task.cwd, config: structuredClone(project.config),
       checkpoint: payload.checkpoint, instruction: payload.instruction, state: 'preparing', createdAt: now, updatedAt: now, reportedComplete: false, verification: null };

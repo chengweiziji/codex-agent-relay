@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="960" viewBox="0 0 1200 960" role="img" aria-labelledby="title desc"><title id="title">First-time setup</title><desc id="desc">Setup guide showing installation, model selection, and handoff preparation.</desc><rect width="1200" height="960" rx="12" fill="#ffffff"/><g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif">
 <text x="48" y="58" font-size="14" fill="#57606a" font-weight="600">CODEX AGENT RELAY</text>
 <text x="48" y="102" font-size="30" fill="#24292f" font-weight="650">First-time setup</text>
-<text x="48" y="139" font-size="17" fill="#57606a" font-weight="400">Install once, choose a receiver; real dispatch stays blocked until isolation and model identity are verified.</text>
+<text x="48" y="139" font-size="17" fill="#57606a" font-weight="400">Install once, choose a receiver; every handoff attests the actual model and workspace-write sandbox.</text>
 <path d="M48 165H1152" stroke="#d0d7de"/>
 <rect x="48" y="196" width="32" height="32" rx="6" fill="#0969da"/>
 <text x="58" y="219" font-size="18" fill="white" font-weight="600">1</text>
@@ -17,7 +17,7 @@
 <text x="58" y="579" font-size="18" fill="white" font-weight="600">3</text>
 <text x="96" y="580" font-size="21" fill="#24292f" font-weight="600">Start a project chat</text>
 <text x="96" y="617" font-size="15" fill="#57606a" font-weight="400">Work normally in your configured project.</text>
-<text x="96" y="645" font-size="15" fill="#57606a" font-weight="400">Near the threshold Codex saves a checkpoint; real dispatch needs a verified adapter.</text>
+<text x="96" y="645" font-size="15" fill="#57606a" font-weight="400">Near the threshold Codex saves a checkpoint; the handoff attests route and sandbox.</text>
 <rect x="610" y="195" width="542" height="646" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="636" y="231" font-size="17" fill="#24292f" font-weight="600">Settings / First-time setup</text>
 <path d="M610 252H1152" stroke="#d0d7de"/>
@@ -44,5 +44,5 @@
 <text x="652" y="809" font-size="15" fill="#fff" font-weight="600">Save and enable project</text>
 <path d="M48 869H1152" stroke="#d0d7de"/>
 <text x="48" y="902" font-size="17" fill="#24292f" font-weight="500">Change the model later: Settings → project → Agent / Provider / Model → Save.</text>
-<text x="48" y="932" font-size="13" fill="#6e7781" font-weight="400">Illustration with example paths. The bundled adapter does not dispatch real tasks; other Agents need an adapter.</text>
+<text x="48" y="932" font-size="13" fill="#6e7781" font-weight="400">Illustration with example paths. The bundled adapter dispatches only in the workspace-write sandbox and attests provider/model; other Agents need an adapter.</text>
 </g></svg>

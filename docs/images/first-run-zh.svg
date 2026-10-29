@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="960" viewBox="0 0 1200 960" role="img" aria-labelledby="title desc"><title id="title">首次设置</title><desc id="desc">首次设置示意图，显示安装、选择模型、交接准备三个步骤。</desc><rect width="1200" height="960" rx="12" fill="#ffffff"/><g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif">
 <text x="48" y="58" font-size="14" fill="#57606a" font-weight="600">CODEX AGENT RELAY</text>
 <text x="48" y="102" font-size="30" fill="#24292f" font-weight="650">首次设置</text>
-<text x="48" y="139" font-size="17" fill="#57606a" font-weight="400">安装一次，选好接收方；真实派发在隔离与模型核验完成前保持禁用。</text>
+<text x="48" y="139" font-size="17" fill="#57606a" font-weight="400">安装一次，选好接收方；每次交接都核验实际模型与 workspace-write 沙箱。</text>
 <path d="M48 165H1152" stroke="#d0d7de"/>
 <rect x="48" y="196" width="32" height="32" rx="6" fill="#0969da"/>
 <text x="58" y="219" font-size="18" fill="white" font-weight="600">1</text>
@@ -17,7 +17,7 @@
 <text x="58" y="579" font-size="18" fill="white" font-weight="600">3</text>
 <text x="96" y="580" font-size="21" fill="#24292f" font-weight="600">开始聊天</text>
 <text x="96" y="617" font-size="15" fill="#57606a" font-weight="400">在配置过的项目中正常开始执行任务。</text>
-<text x="96" y="645" font-size="15" fill="#57606a" font-weight="400">额度接近阈值时保存检查点；真实派发需已核验的适配器。</text>
+<text x="96" y="645" font-size="15" fill="#57606a" font-weight="400">额度接近阈值时保存检查点；交接后核验路由与沙箱。</text>
 <rect x="610" y="195" width="542" height="646" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="636" y="231" font-size="17" fill="#24292f" font-weight="600">设置 / 首次设置</text>
 <path d="M610 252H1152" stroke="#d0d7de"/>
@@ -44,5 +44,5 @@
 <text x="652" y="809" font-size="15" fill="#fff" font-weight="600">保存并启用此项目</text>
 <path d="M48 869H1152" stroke="#d0d7de"/>
 <text x="48" y="902" font-size="17" fill="#24292f" font-weight="500">以后换模型：设置 → 选择项目 → 修改 Agent / Provider / 模型 → 保存。</text>
-<text x="48" y="932" font-size="13" fill="#6e7781" font-weight="400">说明图，使用示例路径。内置适配器暂不派发真实任务；其他 Agent 需要另加适配器。</text>
+<text x="48" y="932" font-size="13" fill="#6e7781" font-weight="400">说明图，使用示例路径。内置适配器只在 workspace-write 沙箱中派发，并核验 provider/model；其他 Agent 需要另加适配器。</text>
 </g></svg>

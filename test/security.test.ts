@@ -8,6 +8,7 @@ import { childEnv, JsonRpc } from '../src/rpc.ts';
 import { findProject, saveProject, atomicJSON, readJSON, projectFingerprint } from '../src/config.ts';
 import { persistedState, scanSecrets } from '../src/privacy.ts';
 import { DshAdapter } from '../src/adapters/dsh.ts';
+import { windowsWorkspaceAcl } from '../src/acl.ts';
 import { Relay } from '../src/relay.ts';
 import { QuotaReader } from '../src/quota.ts';
 import { saveSetup } from '../src/setup.ts';
@@ -35,8 +36,15 @@ test('setup and config mutation require explicit confirmation',async t=>{
   const {home,project}=fixture(t);assert.throws(()=>saveSetup(home,{project}),/confirm/);
   const relay=new Relay(home);t.after(()=>relay.close());await assert.rejects(action(relay,'config',{project,config}),/confirmation/);
 });
-test('built-in adapter refuses real dispatch before any receiver is spawned',()=>{
-  assert.throws(()=>new DshAdapter().validate(config,{command:process.execPath,args:['unused','--profile','sdk']}),/automatic dispatch disabled/);
+test('built-in adapter accepts only the workspace-write receiver mode',()=>{
+  const launch={command:process.execPath,args:['unused','--profile','sdk']};
+  assert.doesNotThrow(()=>new DshAdapter().validate(config,launch));
+  assert.throws(()=>new DshAdapter().validate(config,{...launch,env:{DSH_PERMISSION_MODE:'danger-full-access'}}),/DSH_PERMISSION_MODE/);
+});
+test('windows ACL preflight accepts a private workspace and is read-only',{skip:process.platform!=='win32'},t=>{
+  const {project}=fixture(t);
+  assert.equal(windowsWorkspaceAcl(project).ok,true);
+  assert.doesNotThrow(()=>new DshAdapter().preflight(project));
 });
 test('persisted state omits full instructions and checkpoints, redacts nested evidence',()=>{
   const task={id:'t',checkpoint:cp} as Task;

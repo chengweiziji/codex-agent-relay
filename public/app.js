@@ -70,7 +70,7 @@ $('setup-form').onsubmit=async e=>{
   try{
     const result=await api('setup_save',{confirmed:true,project:$('setup-project').value,agent:$('setup-agent').value,harnessPath:$('setup-harness').value,provider:$('setup-provider').value,model:$('setup-model').value,thresholdPercent:Number($('setup-threshold').value),quotaBucket:$('setup-bucket').value,credentialEnv:$('setup-credential').value});
     addingProject=true;
-    $('setup-result').textContent='已保存配置。真实自动派发因隔离和模型核验缺口暂停。Saved; real dispatch is blocked pending verified isolation and model identity.'+(result.credentialAvailable===false?' 当前服务未读取到该环境变量，设置后重启服务。Credential variable is missing; set it and restart the service.':'');
+    $('setup-result').textContent='已保存配置。交接时会在首个请求核验实际 provider/model 和 workspace-write 沙箱；不匹配会立即终止。Saved; each handoff attests the actual provider/model and workspace-write sandbox before acceptance.'+(result.credentialAvailable===false?' 当前服务未读取到该环境变量，设置后重启服务。Credential variable is missing; set it and restart the service.':'');
     await refresh();$('project').value=result.project;await loadConfig();
   }catch(e){showError(e)}finally{if(button)button.disabled=false}
 };
@@ -80,4 +80,4 @@ $('download-result').onclick=()=>{const job=data?.jobs.find(j=>j.id===selected);
 if(settingsRequested){$('live-view').hidden=true;$('settings-view').hidden=false}
 refresh();setInterval(refresh,3000);
 
-function confirmDisclosure(project,agent,provider,model){return confirm(`确认此项目配置 / Approve project configuration?\n${project}\n${agent} / ${provider} / ${model}\n任务说明、代码和工具输出可能发送到模型服务。保留期限取决于供应商及账户政策，Relay 不保证零保留。\nTask context, code and tool output may leave this computer. Provider retention depends on its policy and your account.\n当前内置接收器尚不能验证目录、网络隔离及实际模型；真实派发保持禁用。\nReceiver isolation and actual model are unverified; real dispatch remains disabled.`)}
+function confirmDisclosure(project,agent,provider,model){return confirm(`确认此项目配置 / Approve project configuration?\n${project}\n${agent} / ${provider} / ${model}\n任务说明、代码和工具输出可能发送到模型服务。保留期限取决于供应商及账户政策，Relay 不保证零保留。\nTask context, code and tool output may leave this computer. Provider retention depends on its policy and your account.\n接收方以 workspace-write 沙箱运行：它限制写入位置，但读取、网络和进程可见性不受隔离；需要审批的操作会失败关闭。实际 provider/model 会被核验，不匹配立即终止。\nThe receiver runs in a workspace-write sandbox: writes are confined, but reads, network and process visibility are not isolated; operations needing approval fail closed. The actual provider/model is attested and a mismatch stops the receiver.`)}

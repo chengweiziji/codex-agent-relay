@@ -6,15 +6,15 @@
 
 When Codex is close to its usage limit and your task is unfinished, it prepares a checkpoint and can hand the remaining work to another Agent on your computer. You choose the receiving Agent and model. Progress and the final answer appear in the right-hand panel of the same Codex window.
 
-Once a project is approved, Hooks track execution tasks and prompt Codex to finish or prepare a checkpoint near the quota threshold. **Real automatic dispatch is intentionally blocked in this preview:** the bundled DeepSeek Harness transport cannot yet verify receiver isolation or the actual provider/model. The simulated demo and reviewed custom adapters exercise the full handoff path.
+Once a project is approved, Hooks track execution tasks and prompt Codex to finish or prepare a checkpoint near the quota threshold. The bundled DeepSeek Harness adapter can take over the remaining work in a **workspace-write** sandbox: writes are confined to the project, and the actual provider/model plus sandbox mode are attested from the first request, stopping the receiver on any mismatch. Reads, network access and process visibility are not isolated, and operations that need interactive approval fail closed.
 
-**Status:** v0.1.0 preview. **License:** MIT. **Bundled adapter:** DeepSeek Harness (transport only; dispatch blocked). Qoder CN and ZCode are not integrated yet. **Local prerequisite:** `gitleaks` or a reviewed scanner configured in `user.json`; handoff fails closed without one.
+**Status:** v0.1.0 preview. **License:** MIT. **Bundled adapter:** DeepSeek Harness (real dispatch with route/sandbox attestation; Windows ACL preflight). Qoder CN and ZCode are not integrated yet. **Local prerequisite:** `gitleaks` or a reviewed scanner configured in `user.json`; handoff fails closed without one.
 
 ## What happens in a chat
 
 1. Codex works on your task and saves checkpoints.
 2. At **5% or less remaining quota**, a tool-boundary hook asks Codex to finish or hand off. You can change the threshold.
-3. If work remains, Codex saves the progress, remaining steps, changed files, tests and running-process identifiers, then calls the handoff tool. The bundled adapter currently refuses the transfer; a reviewed custom adapter must do it.
+3. If work remains, Codex saves the progress, remaining steps, changed files, tests and running-process identifiers, then calls the handoff tool. The bundled DeepSeek Harness adapter starts the receiver after a local permission preflight; a custom adapter must provide its own preflight and isolation.
 4. The chat shows the selected Agent, model, receipt and any user-recorded evidence. Codex stops source execution only after a successful dispatch.
 5. The receiver continues in the project directory. The local panel shows activity, the final answer and recorded evidence. Use **Save .md** to export the result. File changes stay in the project.
 
@@ -73,7 +73,7 @@ Open the local URL it prints. Fill in:
 | Threshold | Default `5`, meaning 5% remaining |
 | Credentials | Environment variable **name**, e.g. `DEEPSEEK_API_KEY`; leave blank for Harness's existing credential setup |
 
-Click **Save and enable** and confirm the data-disclosure dialog. This writes local configuration, without starting a task or calling a model. You can configure a project before its first task; no JSON editing is needed. The bundled adapter still refuses real dispatch after saving.
+Click **Save and enable** and confirm the data-disclosure dialog. This writes local configuration, without starting a task or calling a model. You can configure a project before its first task; no JSON editing is needed. On Windows, choose a project folder that grants your own account full control (for example under your user profile); the first handoff refuses to start if that permission is missing, and it never edits permissions automatically.
 
 Do not enter an API key into the page. Set credential environment variables before starting the local service. Restart it after changing that environment. Existing Harness launch preferences are preserved.
 
@@ -81,7 +81,7 @@ Do not enter an API key into the page. Set credential environment variables befo
 
 Start an execution task in the configured project. Trusted Hooks prompt Codex to register it and maintain checkpoints. For the first chat, you can explicitly invoke `$codex-agent-relay` and confirm the task appears in the panel. Once registered, the hook supplies the handoff instruction at the threshold; you do not need to watch the quota yourself.
 
-Completed work, Plan mode, paused tasks and tasks waiting for your decision are excluded. A handoff attempt against the bundled adapter returns an explicit “dispatch disabled” error; treat that as a capability limit, not a successful handoff. Use `node scripts/demo.ts` or install a reviewed adapter to exercise real event flow.
+Completed work, Plan mode, paused tasks and tasks waiting for your decision are excluded. Once a handoff is accepted, the receiver owns the workspace: source tool calls are denied until its result is reviewed. The relay never auto-approves: an approval request is only logged, and a run that needs one cannot be reported as completed.
 
 ## Change the Agent or model
 
@@ -99,11 +99,11 @@ node src/cli.ts status
 
 ## Verified behavior and limits
 
-- **59 tests passed locally on Windows**, including installed Hooks/MCP, quota thresholds, duplicate dispatch, project isolation, setup, execution after source MCP exit, environment allowlisting, project-trust fingerprints, persisted-state omission, evidence-only verification, retention, scanner blocking and process-tree stop. Includes real Gitleaks bypass regressions and preflight/retention/settings races. Type checking passed. [Tested versions and evidence](docs/verification.md)
-- **Historical:** on an earlier build, a real Harness run accepted a task and modified a disposable project; independent testing passed, while the receiver's own shell verification was blocked by Windows sandbox provisioning. That run is not current capability: the shipped adapter now refuses dispatch before a receiver starts.
+- **64 tests, all passing locally on Windows with a local Gitleaks binary** (60 pass and the 4 real-scanner tests skip without `RELAY_TEST_GITLEAKS`), including installed Hooks/MCP, quota thresholds, duplicate dispatch, project isolation, setup, execution after source MCP exit, environment allowlisting, project-trust fingerprints, persisted-state omission, evidence-only verification, retention, scanner blocking and process-tree stop. Includes real Gitleaks bypass regressions, route/sandbox attestation failures and the Windows ACL preflight. Type checking passed. [Tested versions and evidence](docs/verification.md)
+- **Real end-to-end run on this build:** the bundled adapter dispatched a disposable two-file project to `deepseek-official/deepseek-v4-flash`, attested `workspace-write` and `ask`, changed `sum.cjs`, and ended with `reportedComplete: true`; an independent `node test.cjs` printed `E2E_TEST_PASSED`. Completion is self-reported: inspect the files and tests yourself before treating work as accepted.
 - A fully installed-and-trusted production Hooks workflow still needs host-side acceptance testing. Cross-platform CI is supplied; actual runs appear in this repository's Actions tab.
 - A long request can consume the reserve before a hook runs. Unknown or exhausted quota retains the checkpoint and does not fabricate a handoff.
-- The receiver keeps its own permissions and sandbox. The relay does not auto-approve requests or disable protections. A custom adapter is trusted code and must implement its own isolation and route verification.
+- The receiver's sandbox confines **writes and deletes** to the project (plus its private temp directory). It does not restrict reads, network access or process visibility, and it is not a virtual machine. The relay never auto-approves escalations; a receiver that needs approval stops as `waiting_user`. A custom adapter is trusted code and must implement its own isolation and route verification.
 
 Try a disposable project first. The demo uses **simulated quota and a simulated Agent**, needs no credentials, and prints a local panel URL:
 
@@ -125,7 +125,7 @@ node scripts/package.ts
 
 The release uses an explicit file list. Credentials, real task history, local installations and logs are excluded. `dist/` contains the archive, manifest and SHA-256 checksum.
 
-The optional real smoke test is intentionally disabled: `scripts/smoke-real.ts` throws before spawning a receiver or making a provider call. Historical real-run evidence is retained in [verification](docs/verification.md). Re-enable only after a reviewed adapter provides isolation and actual provider/model attestation.
+The optional real smoke test is opt-in: `scripts/smoke-real.ts` does nothing unless `RELAY_SMOKE_REAL=1`. With that set, it requires explicit `RELAY_SMOKE_PROVIDER` and `RELAY_SMOKE_MODEL`, a Harness launch (`RELAY_SMOKE_DSH` or `agents.deepseek-harness` in `user.json`), `DEEPSEEK_API_KEY` (or `RELAY_SMOKE_CREDENTIAL`) and a local scanner. It uses a disposable project under your user profile and simulated quota, and spends real provider credits. Current real-run evidence is recorded in [verification](docs/verification.md).
 
 ## Disable or uninstall
 

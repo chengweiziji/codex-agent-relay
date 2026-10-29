@@ -1,6 +1,6 @@
 # Security and data handling
 
-This page describes the trust boundary of the preview build. It is not a claim that the relay is a sandbox. The built-in DeepSeek Harness adapter refuses real dispatch until receiver isolation and actual-model identity can be verified.
+This page describes the trust boundary of the current build. It is not a claim that the relay itself is a sandbox. The built-in DeepSeek Harness adapter dispatches for real only into the Harness `workspace-write` sandbox, after attesting the actual provider/model, sandbox mode and approval policy on the live session, and after a read-only Windows ACL preflight of the project folder.
 
 ## Project approval
 
@@ -46,7 +46,7 @@ Receivers do not inherit the full service environment. They receive a fixed allo
 
 Stopping a job terminates the owned process tree with a process group on POSIX or `taskkill /T /F` on Windows. This is cleanup, not a filesystem or network sandbox. Deliberately detached or background processes may survive; a cancelled or crashed job keeps a recovery fence until the user inspects the former runtime and supplies explicit recovery evidence.
 
-The shipped adapter does not provide verified filesystem/network isolation. A custom adapter is trusted user-installed code and is responsible for its own isolation, credential handling and provider/model validation. Do not describe a custom adapter as sandboxed unless that property has been tested.
+The shipped DeepSeek Harness adapter confines writes and deletes to the workspace through the Harness `workspace-write` sandbox. Reads, network access and process visibility are not confined: the receiver can read files outside the project and reach the network. Approvals have no interactive channel and are never granted: a run that needs one cannot be reported as completed. The adapter verifies the live session's actual provider/model, sandbox mode and approval policy, watches subagent sessions for route drift, and stops the receiver on any mismatch. On Windows it refuses to start if the project folder does not grant the signed-in account effective ChangePermissions and TakeOwnership, because the sandbox cannot provision otherwise. A custom adapter is trusted user-installed code and is responsible for its own isolation, credential handling and provider/model validation. Do not describe a custom adapter as sandboxed unless that property has been tested.
 
 ## Verification
 

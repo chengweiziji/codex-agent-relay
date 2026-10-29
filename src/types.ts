@@ -76,5 +76,6 @@ export interface AdapterEvent { kind: 'accepted' | 'running' | 'waiting_user' | 
 export interface AgentRun { done: Promise<void>; stop(): Promise<void> }
 export interface AgentAdapter {
   validate(config: ProjectConfig, launch: LaunchConfig): void;
+  preflight?(cwd: string): void;
   start(job: Job, launch: LaunchConfig, emit: (event: AdapterEvent) => void): AgentRun;
 }

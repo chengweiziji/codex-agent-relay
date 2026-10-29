@@ -7,6 +7,7 @@ Implement `AgentAdapter` from `src/types.ts` and default-export an instance:
 ```ts
 interface AgentAdapter {
   validate(config: ProjectConfig, launch: LaunchConfig): void;
+  preflight?(cwd: string): void;
   start(job: Job, launch: LaunchConfig, emit: (event: AdapterEvent) => void): AgentRun;
 }
 interface AgentRun {
@@ -17,8 +18,8 @@ interface AgentRun {
 
 Register it under `adapterModules` and a same-named `agents` launch entry, restart the service, then select its ID in a project's config. Unsupported Agent IDs fail; they do not silently use DeepSeek.
 
-The adapter must validate exact provider/model routing, emit `accepted` only after a real receipt, return promptly with a `done` promise, reject that promise for transport/execution failures, and stop/reap only its owned runtime. It must not expand the checkpoint's permissions or auto-approve user decisions. Emit concise metadata; avoid raw tool arguments, secrets, or unrestricted logs. An ended turn is not proof of acceptance criteria.
+The adapter must validate exact provider/model routing, verify what the receiver actually runs before emitting `accepted`, return promptly with a `done` promise, reject that promise for transport/execution failures, and stop/reap only its owned runtime. `preflight` runs after all quota, secret and ownership checks but before a job is created; use it for read-only environment checks such as the Windows permission preflight and never to modify the environment. The adapter must not expand the checkpoint's permissions or auto-approve user decisions. Emit concise metadata; avoid raw tool arguments, secrets, or unrestricted logs. An ended turn is not proof of acceptance criteria.
 
 Events: `accepted`, `running`, `waiting_user`, `log`, `ended`. Accepted events carry `receipt` and `sessionId`. Ended events carry final text and optional `reportedComplete`. `relay_verify` records user-supplied evidence only; no code path marks a job as “passed”.
 
-The first release includes a DeepSeek Harness SDK transport and protocol fixtures. The shipped `deepseek-harness` adapter rejects real dispatch because the SDK does not provide verified filesystem/network/tool isolation or actual provider/model attestation. Real execution requires a reviewed custom adapter that supplies those properties; being listed in configuration is not evidence of either. Qoder CN and ZCode need separately implemented and tested adapters. Do not advertise them as working merely because the configuration can hold their names.
+The bundled `deepseek-harness` adapter uses the SDK stdio transport with the `sdk` profile. It emits `accepted` only after both the durable prompt receipt and runtime attestation: `request/header`/`request/context` must name the approved provider and model, `sandbox/mode` must be `workspace-write`, and `approval/policy` must be `ask` or `never`. Child sessions announced by `subagent.started` are checked for route drift, but only the main session can satisfy acceptance: child events never stand in for the main session's route, sandbox or approval-policy attestation. A mismatch stops the runtime before its next tool call. On Windows it also requires the signed-in user to hold effective change-permissions and take-ownership on the workspace; otherwise it refuses before spawning the receiver, rather than letting the sandbox fail later. The receiver confines writes and deletes to the workspace but does not isolate reads, network access or process visibility, and it has no interactive approval channel, so approval requests are never granted and a run that needs one cannot be reported as completed. Qoder CN and ZCode need separately implemented and tested adapters. Do not advertise them as working merely because the configuration can hold their names.

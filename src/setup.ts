@@ -36,10 +36,11 @@ export function saveSetup(home: string, input: any): any {
   user.agents = { ...user.agents, 'deepseek-harness': {
     ...previous, command: process.execPath, args: [entry, '--profile', 'sdk'],
     // Use the existing Harness home unless the user's launch configuration specifies another.
-    env: { ...previous?.env }, envFrom,
+    // The relay only accepts a workspace-write receiver; asking for anything wider fails validation.
+    env: { ...previous?.env, DSH_PERMISSION_MODE: 'workspace-write' }, envFrom,
   } };
   atomicJSON(join(home, 'user.json'), user);
   saveProject(project, config, home); rememberProject(home, project);
   return { project, config, credentialAvailable: credentialEnv ? !!process.env[credentialEnv] : null,
-    next: 'Install and review/trust the plugin Hooks in Codex, then start an execution chat in this project. Automatic real dispatch remains blocked until receiver isolation and actual-model verification are supported. No model call was started.' };
+    next: 'Install and review/trust the plugin Hooks in Codex, then start an execution chat in this project. Handoffs run DeepSeek Harness in the workspace-write sandbox; the actual provider/model and sandbox mode are attested from the first request and a mismatch stops the receiver. On Windows the project folder must grant your account full control. No model call was started.' };
 }

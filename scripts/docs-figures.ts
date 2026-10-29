@@ -5,15 +5,15 @@ const escape=(s:string)=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replac
 for(const language of ['en','zh'] as const){
   const zh=language==='zh';
   const title=zh?'首次设置':'First-time setup';
-  const subtitle=zh?'安装一次，选好接收方；真实派发在隔离与模型核验完成前保持禁用。':'Install once, choose a receiver; real dispatch stays blocked until isolation and model identity are verified.';
+  const subtitle=zh?'安装一次，选好接收方；每次交接都核验实际模型与 workspace-write 沙箱。':'Install once, choose a receiver; every handoff attests the actual model and workspace-write sandbox.';
   const steps=zh?[
     ['安装插件','下载完整项目并运行安装脚本。','在 Codex 中安装插件，审核并信任 Hooks。'],
     ['选择项目和模型','打开设置页，填写右侧这些字段。','模型由你选择；这里不会发起模型调用。'],
-    ['开始聊天','在配置过的项目中正常开始执行任务。','额度接近阈值时保存检查点；真实派发需已核验的适配器。'],
+    ['开始聊天','在配置过的项目中正常开始执行任务。','额度接近阈值时保存检查点；交接后核验路由与沙箱。'],
   ]:[
     ['Install the plugin','Download the full project and run the installer.','Install in Codex; review and trust its Hooks.'],
     ['Choose a project and model','Open Settings and fill in the fields shown here.','You choose the model. Saving makes no model call.'],
-    ['Start a project chat','Work normally in your configured project.','Near the threshold Codex saves a checkpoint; real dispatch needs a verified adapter.'],
+    ['Start a project chat','Work normally in your configured project.','Near the threshold Codex saves a checkpoint; the handoff attests route and sandbox.'],
   ];
   const fields=[
     [zh?'项目目录':'Project folder','D:/work/my-project'],
@@ -34,7 +34,7 @@ for(const language of ['en','zh'] as const){
     const y=282+i*77;
     parts.push(text(636,y,label!,13,'#57606a',500),`<rect x="636" y="${y+10}" width="490" height="38" rx="5" fill="white" stroke="${i===4?'#0969da':'#d0d7de'}"/>`,text(650,y+35,value!,15,i===4?'#6e7781':'#24292f'));
   });
-  parts.push(text(636,766,zh?'凭证：环境变量名或 Harness 已有凭证':'Credentials: environment name or existing Harness login',13,'#57606a'),'<rect x="636" y="785" width="230" height="36" rx="5" fill="#0969da"/>',text(652,809,zh?'保存并启用此项目':'Save and enable project',15,'#fff',600),'<path d="M48 869H1152" stroke="#d0d7de"/>',text(48,902,zh?'以后换模型：设置 → 选择项目 → 修改 Agent / Provider / 模型 → 保存。':'Change the model later: Settings → project → Agent / Provider / Model → Save.',17,'#24292f',500),text(48,932,zh?'说明图，使用示例路径。内置适配器暂不派发真实任务；其他 Agent 需要另加适配器。':'Illustration with example paths. The bundled adapter does not dispatch real tasks; other Agents need an adapter.',13,'#6e7781'),'</g></svg>');
+  parts.push(text(636,766,zh?'凭证：环境变量名或 Harness 已有凭证':'Credentials: environment name or existing Harness login',13,'#57606a'),'<rect x="636" y="785" width="230" height="36" rx="5" fill="#0969da"/>',text(652,809,zh?'保存并启用此项目':'Save and enable project',15,'#fff',600),'<path d="M48 869H1152" stroke="#d0d7de"/>',text(48,902,zh?'以后换模型：设置 → 选择项目 → 修改 Agent / Provider / 模型 → 保存。':'Change the model later: Settings → project → Agent / Provider / Model → Save.',17,'#24292f',500),text(48,932,zh?'说明图，使用示例路径。内置适配器只在 workspace-write 沙箱中派发，并核验 provider/model；其他 Agent 需要另加适配器。':'Illustration with example paths. The bundled adapter dispatches only in the workspace-write sandbox and attests provider/model; other Agents need an adapter.',13,'#6e7781'),'</g></svg>');
   writeFileSync(join(dir,`first-run-${language}.svg`),parts.join('\n'));
 }
 console.log('Wrote docs/images/first-run-en.svg and first-run-zh.svg');
