@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "enabled": true,
+  "agent": "deepseek-harness",
+  "provider": "deepseek-official",
+  "model": "deepseek-v4-flash",
+  "thresholdPercent": 5,
+  "quotaBucket": "codex"
+}

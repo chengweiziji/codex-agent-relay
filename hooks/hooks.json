@@ -1,0 +1,12 @@
+{
+  "description": "Project-opt-in quota reminders and cooperative handoff fencing. Review and trust these hooks in Codex before use.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "commandWindows": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "timeout": 15 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "commandWindows": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "timeout": 15 }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "commandWindows": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "timeout": 15 }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "commandWindows": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "timeout": 15 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "commandWindows": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "timeout": 15 }] }],
+    "Interrupt": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "commandWindows": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "timeout": 3 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "commandWindows": "node \"${PLUGIN_ROOT}/src/cli.ts\" hook", "timeout": 3 }] }]
+  }
+}

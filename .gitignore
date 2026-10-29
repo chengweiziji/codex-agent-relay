@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.local/
+.agent-relay.json
+*.log
+*.tgz
+*.zip
+.env*
+!.env.example

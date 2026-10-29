@@ -1,0 +1,21 @@
+{
+  "name": "codex-agent-relay",
+  "version": "0.1.0",
+  "description": "Project-scoped, quota-aware Codex handoff to DeepSeek Harness with a live local dashboard",
+  "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/chengweiziji/codex-agent-relay.git" },
+  "homepage": "https://github.com/chengweiziji/codex-agent-relay#readme",
+  "bugs": { "url": "https://github.com/chengweiziji/codex-agent-relay/issues" },
+  "engines": { "node": ">=24.0.0" },
+  "bin": { "codex-agent-relay": "bin/relay.mjs" },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "check": "tsc --noEmit",
+    "start": "node src/cli.ts serve",
+    "demo": "node scripts/demo.ts",
+    "pack:release": "node scripts/package.ts"
+  },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "~5.9.3" },
+  "files": ["bin", "src", "public", "skills", "hooks", ".codex-plugin", ".mcp.json", "examples", "docs", "README.md", "README.zh-CN.md", "LICENSE"]
+}

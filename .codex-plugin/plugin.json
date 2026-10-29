@@ -1,0 +1,10 @@
+{
+  "name": "codex-agent-relay",
+  "version": "0.1.0",
+  "description": "Hand unfinished Codex work to a project-selected Agent before quota runs out.",
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "extensions": { "com.openai": { "onboardingSkill": "./skills/relay-setup/SKILL.md" } }
+}

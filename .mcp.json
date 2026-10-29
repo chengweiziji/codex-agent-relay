@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agent_relay": {
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/src/cli.ts", "mcp"]
+    }
+  }
+}

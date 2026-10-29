@@ -1,0 +1,11 @@
+interface:
+  display_name: "Codex Agent Relay"
+  short_description: "Hand unfinished work to another Agent before quota runs out"
+  default_prompt: "Use $codex-agent-relay to configure this project's handoff Agent and model."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "agent_relay"
+      description: "Local Codex Agent Relay service"
+policy:
+  allow_implicit_invocation: true

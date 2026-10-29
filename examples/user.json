@@ -1,0 +1,14 @@
+{
+  "codex": { "command": "codex", "args": ["app-server", "--stdio"] },
+  "agents": {
+    "deepseek-harness": {
+      "command": "node",
+      "args": ["/absolute/path/to/@deepseek-ai/dsh/lib/bin.js", "--profile", "sdk"],
+      "env": { "DSH_HOME": "/absolute/path/to/your/relay-dsh-home" },
+      "envFrom": { "DEEPSEEK_API_KEY": "DEEPSEEK_API_KEY" },
+      "initializeTimeoutMs": 15000,
+      "receiptTimeoutMs": 15000,
+      "runTimeoutMs": 7200000
+    }
+  }
+}
