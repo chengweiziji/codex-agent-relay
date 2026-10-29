@@ -2,7 +2,7 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Agent Relay</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body><main>
   <header><div class="brand"><span class="mark">↗</span><div><strong>Agent Relay</strong><small>CODEX → YOUR NEXT AGENT</small></div></div><span id="connection" class="connection">连接中</span></header>
-  <section class="intro"><p class="eyebrow">CODEX AGENT RELAY</p><h1>额度交接</h1><p class="muted">Codex 整理剩余工作，你选择的 Agent 接着执行。控制服务运行在本机；模型调用可能发送任务内容到外部服务。真实自动派发目前暂停。</p></section>
+  <section class="intro"><p class="eyebrow">CODEX AGENT RELAY</p><h1>额度交接</h1><p class="muted">Codex 整理剩余工作，你选择的 Agent 接着执行。控制服务运行在本机；任务内容可能发送到外部模型服务。交接前会核验实际 provider/model 与 workspace-write 沙箱，不匹配立即终止。</p></section>
   <div id="error" role="alert" hidden></div>
   <section class="card overview"><div><span class="label">当前执行状态</span><h2 id="state">等待任务</h2><p id="route" class="muted">在已配置的项目中开始一个执行任务。</p></div><span id="quota" class="quota">—<small>Codex 剩余</small></span></section>
   <nav aria-label="页面"><button id="live-tab" class="tab selected">进度 / Progress</button><button id="settings-tab" class="tab">设置 / Settings</button></nav>
