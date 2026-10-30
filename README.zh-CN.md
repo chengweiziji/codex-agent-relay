@@ -101,7 +101,7 @@ node src/cli.ts status
 
 - **共 73 项测试，在 Windows 本地配合 Gitleaks 全部通过**（未设置 `RELAY_TEST_GITLEAKS` 时 69 项通过、4 项真实扫描测试跳过），覆盖安装后的 Hooks/MCP、额度阈值、重复交接、项目隔离、首次设置、源 MCP 退出后继续执行，以及环境变量白名单、项目信任指纹、持久化脱敏、仅记录证据、保留期限、扫描器失败和进程树终止。新增真实 Gitleaks 绕过、路由/沙箱核验失败和 Windows ACL 预检的回归测试。类型检查通过。[版本与证据](docs/verification.md)
 - **上一构建的真实冒烟（2026-10-30 审查修复之前）：**可选冒烟测试把一次性双文件项目派发给 `deepseek-official/deepseek-v4-flash`，核验 `workspace-write` 与 `ask`，修改了 `sum.cjs`，以 `reportedComplete: true` 结束；独立运行 `node test.cjs` 输出 `SMOKE_TEST_PASSED`。完成状态由接收方自报，仍需自行检查文件与测试后再视为验收通过。
-- 本地验收插件的 7 个 Hook 已被真实 Codex app-server 线程加载、经正常审查流程信任并实际执行，随附 MCP 服务也已就绪；但模型回合内的自动交接与右侧面板打开仍需宿主侧验收——测试账号的模型回合因额度限制被阻止。已提供跨平台 CI，实际运行结果以仓库 Actions 页面为准。
+- 本地验收插件的 7 个 Hook 已被真实 Codex 0.166 app-server 线程加载、经正常审查流程信任并实际执行。真实模型回合中，模型自己调用了 `relay_register` 和 `relay_checkpoint`；随后的 `relay_handoff` 被 Codex 对 destructive 工具的审批要求拦下，未产生接收方任务。为不再消耗 Codex 模型额度，同一 checkpoint 通过受权 relay API 交接给真实接收方：路由 `deepseek-official`/`deepseek-v4-flash`、`workspace-write`、`ask` 均通过核验，仅 `sum.cjs` 被修改，`reportedComplete: true`，独立运行 `node test.cjs` 输出 `HOST_TEST_PASSED`。完全自动的“用户批准后交接”和右侧面板打开仍未验收。已提供跨平台 CI，实际运行结果以仓库 Actions 页面为准。
 - 一次较长请求可能直接跨过阈值耗尽额度。额度未知或已经耗尽时保留检查点，不宣称交接成功。
 - 接收方的沙箱只限制**写入和删除**（项目目录及其私有临时目录），不限制读取、网络访问或进程可见性，也不是虚拟机。Relay 不会自动批准提权；观察到审批事件时将运行标记为失败，等待用户处理。自定义适配器属于受信代码，必须自行实现隔离和路由核验。
 
