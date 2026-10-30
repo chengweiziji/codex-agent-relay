@@ -92,14 +92,15 @@ export class Relay extends EventEmitter {
     const task = this.task(input.taskId);
     if (task.jobId) throw Error('Dispatched task content is immutable');
     const checkpoint = validateCheckpoint(input.checkpoint); rejectSecrets(checkpoint);
-    task.checkpoint = checkpoint; task.checkpointFresh = true; task.updatedAt = new Date().toISOString();
     // Background work must be identified explicitly, with evidence in the checkpoint.
     if (input.backgroundToolIds?.length) {
       if (!checkpoint.processes.length) throw Error('Record background process IDs and inspection evidence first');
+      if (!Array.isArray(input.backgroundToolIds) || input.backgroundToolIds.some((id: unknown) => typeof id !== 'string' || !id)) throw Error('backgroundToolIds must contain nonempty tool IDs');
       task.inFlight = task.inFlight.filter(id => !input.backgroundToolIds.includes(id));
       const key = pathKey(task.cwd);
       this.operations[key] = (this.operations[key] || []).filter(op => op.session !== task.sessionId || !input.backgroundToolIds.includes(op.id));
     }
+    task.checkpoint = checkpoint; task.checkpointFresh = true; task.updatedAt = new Date().toISOString();
     this.save(); return task;
   }
   setState(id: string, state: TaskState): Task {

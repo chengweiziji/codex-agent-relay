@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultHome, readJSON, readUser } from './config.ts';
 import { childEnv } from './rpc.ts';
-interface Endpoint { pid: number; url: string; token: string }
+interface Endpoint { pid: number; url: string; token: string; quotaMode?: string }
 export async function ensureServer(home = defaultHome()): Promise<Endpoint> {
   const lookup = async (): Promise<Endpoint | null> => {
     try {
@@ -14,7 +14,11 @@ export async function ensureServer(home = defaultHome()): Promise<Endpoint> {
       return response.ok && health.pid === endpoint.pid ? endpoint : null;
     } catch { return null; }
   };
-  const existing = await lookup(); if (existing) return existing;
+  const existing = await lookup();
+  if (existsSync(join(home, 'host-test.json'))) {
+    if (!existing || existing.quotaMode !== 'simulated-host-test') throw Error('Host acceptance service is stopped or is not using simulated quota. Restart the isolated host-test daemon; normal-service fallback is disabled.');
+  }
+  if (existing) return existing;
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const logPath = join(home, 'service.log');
   if (existsSync(logPath) && (statSync(logPath).size > 1_000_000 || Date.now() - statSync(logPath).mtimeMs > 7 * 86400000)) rmSync(logPath);

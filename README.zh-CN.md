@@ -4,11 +4,13 @@
 
 [![CI](https://github.com/chengweiziji/codex-agent-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/chengweiziji/codex-agent-relay/actions/workflows/ci.yml)
 
-Codex 额度快用完、任务还没做完时，先整理检查点，再把剩余工作交给电脑上的另一个 Agent。接收 Agent 和模型由你选择，执行过程和最终答复显示在同一 Codex 窗口右侧。
+Codex 额度快用完、任务还没做完时，先整理检查点，再把剩余工作交给电脑上的另一个 Agent。接收 Agent 和模型由你选择，执行过程和最终答复显示在本地进度页；自动在同一 Codex 窗口右侧打开仍待桌面端验收。
 
 项目获准后，Hooks 会跟踪执行任务，并在接近额度阈值时提醒 Codex 完成或保存检查点。随附的 DeepSeek Harness 适配器可以在 **workspace-write** 沙箱中接管剩余工作：写入被限制在项目内，首个请求会核验实际 provider/model 与沙箱模式，不匹配就立即停止接收方。读取、网络和进程可见性不受隔离；需要交互审批的操作会失败关闭。
 
 **版本：**v0.1.0 预览版。**许可证：**MIT。**当前适配器：**DeepSeek Harness（真实派发，含路由/沙箱核验和 Windows ACL 预检）。Qoder CN、ZCode 暂未接入。**本机前置条件：**`gitleaks`，或在 `user.json` 中配置经过审核的扫描器；没有可用扫描器时交接会失败关闭。
+
+**最新验收（2026-10-30）：** 在模拟剩余 4% 额度下，用户确认模型发起交接、获批后成功执行，右侧面板显示最终结果。独立核验确认接收方结束、修复文件、测试哈希未变且测试通过。这不代表无需审批的无人值守交接，也不是真实账户额度跨阈值测试。详见[验收记录](docs/verification.md)顶部。
 
 ## 在一个聊天里会发生什么
 
@@ -81,7 +83,7 @@ node "$HOME/.local/share/codex-agent-relay/src/cli.ts" setup
 
 在该项目里开始执行任务。已信任的 Hooks 会提示 Codex 自动登记任务并维护检查点。第一次可以显式调用 `$codex-agent-relay`，确认页面里出现该任务。登记后，Hooks 会在达到阈值时给出交接指令，不需要一直盯着额度。
 
-已完成、计划模式、暂停以及等待用户决策的任务不会自动交接。交接被接收后，接收方独占该工作区：在查看结果前，源任务的工具调用会被拒绝。Relay 不会自动批准任何审批请求：请求只会被记录，需要审批才能继续的运行不能报告为完成。
+已完成、计划模式、暂停以及等待用户决策的任务不会自动交接。交接被接收后，接收方独占该工作区：在查看结果前，源任务的工具调用会被拒绝。Relay 不会自动批准任何审批请求：观察到接收方审批事件时会停止运行并标记失败，不会报告完成。Codex 在调用 relay_handoff 前可能另行要求批准。
 
 ## 以后怎么换 Agent 或模型
 
@@ -101,7 +103,7 @@ node src/cli.ts status
 
 - **共 73 项测试，在 Windows 本地配合 Gitleaks 全部通过**（未设置 `RELAY_TEST_GITLEAKS` 时 69 项通过、4 项真实扫描测试跳过），覆盖安装后的 Hooks/MCP、额度阈值、重复交接、项目隔离、首次设置、源 MCP 退出后继续执行，以及环境变量白名单、项目信任指纹、持久化脱敏、仅记录证据、保留期限、扫描器失败和进程树终止。新增真实 Gitleaks 绕过、路由/沙箱核验失败和 Windows ACL 预检的回归测试。类型检查通过。[版本与证据](docs/verification.md)
 - **上一构建的真实冒烟（2026-10-30 审查修复之前）：**可选冒烟测试把一次性双文件项目派发给 `deepseek-official/deepseek-v4-flash`，核验 `workspace-write` 与 `ask`，修改了 `sum.cjs`，以 `reportedComplete: true` 结束；独立运行 `node test.cjs` 输出 `SMOKE_TEST_PASSED`。完成状态由接收方自报，仍需自行检查文件与测试后再视为验收通过。
-- 本地验收插件的 7 个 Hook 已被真实 Codex 0.166 app-server 线程加载、经正常审查流程信任并实际执行。真实模型回合中，模型自己调用了 `relay_register` 和 `relay_checkpoint`；随后的 `relay_handoff` 被 Codex 对 destructive 工具的审批要求拦下，未产生接收方任务。为不再消耗 Codex 模型额度，同一任务在保存新的 checkpoint 后通过受权 relay API 交接给真实接收方：路由 `deepseek-official`/`deepseek-v4-flash`、`workspace-write`、`ask` 均通过核验，仅 `sum.cjs` 被修改，`reportedComplete: true`，独立运行 `node test.cjs` 输出 `HOST_TEST_PASSED`。完全自动的“用户批准后交接”和右侧面板打开仍未验收。已提供跨平台 CI，实际运行结果以仓库 Actions 页面为准。
+- 真实 Codex 0.166 app-server 线程将本地验收插件的 7 个 Hook 列为 trusted；有执行记录的是 SessionStart、UserPromptSubmit、PreToolUse、PostToolUse 和 Stop，尚无 Interrupt 和 SessionEnd 的执行证据。真实模型回合中，模型自己调用了 `relay_register` 和 `relay_checkpoint`；随后的 `relay_handoff` 被 Codex 对 destructive 工具的审批要求拦下，未产生接收方任务。为不再消耗 Codex 模型额度，同一任务在保存新的 checkpoint 后通过受权 relay API 交接给真实接收方：路由 `deepseek-official`/`deepseek-v4-flash`、`workspace-write`、`ask` 均通过核验，仅 `sum.cjs` 被修改，`reportedComplete: true`，独立运行 `node test.cjs` 输出 `HOST_TEST_PASSED`。完全自动的“用户批准后交接”和右侧面板打开仍未验收。已提供跨平台 CI，实际运行结果以仓库 Actions 页面为准。
 - 一次较长请求可能直接跨过阈值耗尽额度。额度未知或已经耗尽时保留检查点，不宣称交接成功。
 - 接收方的沙箱只限制**写入和删除**（项目目录及其私有临时目录），不限制读取、网络访问或进程可见性，也不是虚拟机。Relay 不会自动批准提权；观察到审批事件时将运行标记为失败，等待用户处理。自定义适配器属于受信代码，必须自行实现隔离和路由核验。
 

@@ -28,6 +28,38 @@ async function setup(t:any,model='fixture'){
   return {relay,task,project,home,q,count,dir};
 }
 async function settle(relay:Relay,id:string){for(let i=0;i<1200;i++){if(!relay.runs.has(id))return relay.job(id);await new Promise(r=>setTimeout(r,10))}throw Error('Job did not finish')}
+for (const event of ['PostToolUse', 'PostToolUseFailure']) test(`${event} failure releases only the matching session operation`, async t => {
+  const {relay,task,project}=await setup(t);
+  for(const session_id of [task.sessionId,'other']) await relay.hook({cwd:project,session_id,hook_event_name:'PreToolUse',tool_name:'Bash',tool_use_id:'same-id'});
+  await relay.hook({cwd:project,session_id:task.sessionId,hook_event_name:event,tool_name:'Bash',tool_use_id:'same-id',tool_response:{exit_code:1,isError:true}});
+  assert.deepEqual(task.inFlight,[]);
+  assert.equal(relay.workspaceBusy(project),true);
+  await assert.rejects(relay.handoff({taskId:task.id,instruction:'Continue'}),/operations/);
+  await relay.hook({cwd:project,session_id:'other',hook_event_name:event,tool_name:'Bash',tool_use_id:'same-id'});
+  assert.equal(relay.workspaceBusy(project),false);
+});
+test('background release preserves another session and rejected checkpoint is atomic', async t => {
+  const {relay,task,project}=await setup(t);
+  for(const session_id of [task.sessionId,'other']) await relay.hook({cwd:project,session_id,hook_event_name:'PreToolUse',tool_name:'Bash',tool_use_id:'same-id'});
+  const before=structuredClone(task);
+  assert.throws(()=>relay.checkpoint({taskId:task.id,checkpoint:{...checkpoint,goal:'Rejected replacement'},backgroundToolIds:['same-id']}),/process/);
+  assert.deepEqual(task,before);
+  relay.checkpoint({taskId:task.id,checkpoint:{...checkpoint,processes:['PID 123: observed training process; receiver must inspect before restarting']},backgroundToolIds:['same-id']});
+  assert.deepEqual(task.inFlight,[]);
+  assert.equal(relay.workspaceBusy(project),true);
+  await relay.hook({cwd:project,session_id:'other',hook_event_name:'PostToolUse',tool_use_id:'same-id'});
+  assert.equal(relay.workspaceBusy(project),false);
+});
+test('unregistered operations survive restart until matching completion', async t => {
+  const {relay,project,home}=await setup(t);
+  await relay.hook({cwd:project,session_id:'unregistered',hook_event_name:'PreToolUse',tool_name:'Bash',tool_use_id:'pending'});
+  const restored=new Relay(home,new FakeQuota());t.after(()=>restored.close());
+  assert.equal(restored.workspaceBusy(project),true);
+  await restored.hook({cwd:project,session_id:'wrong',hook_event_name:'PostToolUse',tool_use_id:'pending'});
+  assert.equal(restored.workspaceBusy(project),true);
+  await restored.hook({cwd:project,session_id:'unregistered',hook_event_name:'PostToolUse',tool_use_id:'pending'});
+  assert.equal(restored.workspaceBusy(project),false);
+});
 test('quota uses relevant bucket and the most constrained live window',()=>{
   const s=quota(60);s.data.rateLimitsByLimitId.codex.secondary.usedPercent=99;
   assert.equal(remaining(s,'codex'),1);assert.equal(remaining(s,'missing'),null);

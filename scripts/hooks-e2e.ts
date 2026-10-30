@@ -115,8 +115,10 @@ try {
   const fenced = await raw('relay_handoff', { taskId: task.id, instruction: 'Must not dispatch while a tool is in flight.' });
   assert.equal(fenced.isError, true);
   assert.match(fenced.content[0].text, /Wait for tool operations/);
-  hook({ cwd, session_id: sessionId, hook_event_name: 'PostToolUse', tool_name: 'shell', tool_use_id: 'tool-2' });
-  step('in-flight fence', 'handoff rejected while a source tool is in flight, then unblocked');
+  const failedCommand = spawnSync(process.execPath, ['-e', 'process.exit(7)'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  assert.equal(failedCommand.status, 7);
+  hook({ cwd, session_id: sessionId, hook_event_name: 'PostToolUse', tool_name: 'shell', tool_use_id: 'tool-2', tool_response: { exit_code: failedCommand.status, output: failedCommand.stdout } });
+  step('in-flight fence', 'handoff rejected while in flight, then released by PostToolUse for an actual exit-7 fixture (host event simulated)');
 
   const job = await ok('relay_handoff', { taskId: task.id, instruction: 'SIMULATION: complete the Hooks chain fixture.' });
   assert.ok(job.receipt);
