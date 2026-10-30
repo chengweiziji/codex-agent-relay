@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -92,4 +93,16 @@ for(const stalledQuota of [false,true])test(`retention timer expires data with $
   t.mock.timers.enable({apis:['setInterval']});relay.startMonitor();t.mock.timers.tick(30000);
   assert.equal(existsSync(event),false);assert.equal(relay.jobs.length,0);
   assert.equal(readJSON<any>(join(home,'state.json')).jobs.length,0);
+});
+
+test('Windows ACL denies TakeOwnership and preserves the descriptor', {skip:process.platform!=='win32'}, t=>{
+ const {project}=fixture(t);
+ const ps=(script:string)=>execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:{...process.env,RELAY_ACL_TEST:project},encoding:'utf8',windowsHide:true});
+ const original=ps("[System.IO.Directory]::GetAccessControl($env:RELAY_ACL_TEST).GetSecurityDescriptorSddlForm('Access')").trim();
+ try{
+ ps(`$p=$env:RELAY_ACL_TEST; $a=[System.IO.Directory]::GetAccessControl($p); $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $r=[System.Security.AccessControl.FileSystemAccessRule]::new($sid,'TakeOwnership','Deny'); $a.AddAccessRule($r); [System.IO.Directory]::SetAccessControl($p,$a)`);
+ const before=ps("[System.IO.Directory]::GetAccessControl($env:RELAY_ACL_TEST).GetSecurityDescriptorSddlForm('Access')").trim();
+ assert.equal(windowsWorkspaceAcl(project).ok,false);
+ assert.equal(ps("[System.IO.Directory]::GetAccessControl($env:RELAY_ACL_TEST).GetSecurityDescriptorSddlForm('Access')").trim(),before);
+ }finally{ps(`$a=[System.IO.Directory]::GetAccessControl($env:RELAY_ACL_TEST); $a.SetSecurityDescriptorSddlForm('${original}',[System.Security.AccessControl.AccessControlSections]::Access); [System.IO.Directory]::SetAccessControl($env:RELAY_ACL_TEST,$a)`)}
 });

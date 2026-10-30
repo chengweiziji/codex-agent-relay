@@ -17,7 +17,7 @@ const omitted = '[Content omitted from persisted state; provide a fresh checkpoi
 function summary(c: Checkpoint): Checkpoint {
   return { goal: redact(c.goal).slice(0, 160), completed: [], remaining: [], decisions: [], files: [], tests: [], processes: [], permissions: omitted, acceptance: [] };
 }
-export function persistedState(tasks: Task[], jobs: Job[]): unknown {
+export function persistedState(tasks: Task[], jobs: Job[]) {
   return sanitize({
     tasks: tasks.map(t => ({ ...t, checkpoint: summary(t.checkpoint), checkpointHash: digest(t.checkpoint), checkpointFresh: false })),
     jobs: jobs.map(j => ({ ...j, checkpoint: summary(j.checkpoint), instruction: omitted, instructionHash: digest(j.instruction), checkpointHash: digest(j.checkpoint) })),

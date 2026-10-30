@@ -4,7 +4,7 @@ const send = value => process.stdout.write(JSON.stringify(value)+'\n');
 const notify = (method,params) => send({jsonrpc:'2.0',method,params});
 const sessionEvent = (sessionId,type,data) => notify('session.event',{sessionId,event:{type,seq:0,time:Date.now(),data}});
 let model, provider, sessionId;
-const actualModel = () => model==='wrong-route'||model==='child-route' ? 'fallback' : model;
+const actualModel = () => model==='wrong-route' ? 'fallback' : model;
 for await(const line of createInterface({input:process.stdin})){
   const m=JSON.parse(line);
   if(m.method==='initialize'){
@@ -27,12 +27,25 @@ for await(const line of createInterface({input:process.stdin})){
       sessionEvent(sessionId,'request/header',{header:{config:{provider,model:actualModel()}},reason:'initial'});
       sessionEvent(sessionId,'request/context',{provider,model:actualModel(),contextWindow:1000000});
     }
-    if(model==='child-attest')continue;
+    if(model==='child-attest'){sessionEvent(attestId,'request/header',{header:{config:{provider,model}}});continue;}
     if(model==='child-route'){
       const child=sessionId+'-child';
       notify('subagent.started',{parentSessionId:sessionId,childSessionId:child});
       sessionEvent(child,'request/header',{header:{config:{provider,model:'fallback'}},reason:'initial'});
       continue;
+    }
+    if(model==='child-valid'){
+      const child=sessionId+'-child';notify('subagent.started',{parentSessionId:sessionId,childSessionId:child});
+      sessionEvent(child,'request/header',{header:{config:{provider,model}}});
+      sessionEvent(child,'sandbox/mode',{mode:'workspace-write'});sessionEvent(child,'approval/policy',{policy:'ask'});
+      notify('subagent.finished',{parentSessionId:sessionId,childSessionId:child,status:'ok'});
+    }
+    if(model==='approval'){sessionEvent(sessionId,'approval/asked',{toolName:'shell'});sessionEvent(sessionId,'approval/decided',{outcome:'denied'});}
+    if(['grandchild-route','child-missing','child-source'].includes(model)){
+      const child=sessionId+'-child';notify('subagent.started',{parentSessionId:sessionId,childSessionId:child});
+      if(model==='grandchild-route'){const grand=child+'-grand';notify('subagent.started',{parentSessionId:child,childSessionId:grand});sessionEvent(grand,'request/header',{header:{config:{provider,model:'fallback'}}});}
+      if(model==='child-source')sessionEvent(child,'assistant/message',{message:{source:{kind:'model',provider,model:'fallback'},content:[]}});
+      if(model==='child-missing')notify('subagent.finished',{parentSessionId:sessionId,childSessionId:child,status:'ok'});
     }
     if(model==='crash'){setTimeout(()=>process.exit(7),20);continue}
     if(model==='hang')continue;
@@ -43,6 +56,7 @@ for await(const line of createInterface({input:process.stdin})){
       notify('session.event',{sessionId,event:{type:'turn/end',data:{reason:{kind:'completed'}}}});
       if(model==='idle-first')return;
       notify('session.status',{sessionId,status:'idle'});
+      if(model==='late-route')sessionEvent(sessionId,'request/context',{provider,model:'fallback'});
     },Number(process.env.RELAY_TEST_DELAY||60));
   }else if(m.method==='shutdown'){send({id:m.id,result:{}});process.exit(0)}
 }

@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { childEnv } from './rpc.ts';
 import { join } from 'node:path';
 
 // DSH's Windows sandbox provisions a standing write grant by editing the workspace
@@ -8,20 +9,21 @@ import { join } from 'node:path';
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
 $path = $env:RELAY_ACL_PATH
-$id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-$principal = [System.Security.Principal.WindowsPrincipal]::new($id)
-$sid = $id.User
-$acl = [System.IO.Directory]::GetAccessControl($path, [System.Security.AccessControl.AccessControlSections]::Access)
-$rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
-$allow = [System.Security.AccessControl.FileSystemRights]0
-foreach ($rule in $rules) {
-  if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
-  $matches = $rule.IdentityReference -eq $sid
-  if (-not $matches) { $matches = $principal.IsInRole($rule.IdentityReference) }
-  if ($matches) { $allow = $allow -bor $rule.FileSystemRights }
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class RelayAccess {
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
 }
-$need = [System.Security.AccessControl.FileSystemRights]'ChangePermissions, TakeOwnership'
-[pscustomobject]@{ ok = (($allow -band $need) -eq $need); effective = [string]$allow } | ConvertTo-Json -Compress
+"@
+# Opening an existing directory with these rights asks Windows to evaluate the
+# current token and complete DACL. No write, ACL change or ownership change occurs.
+$handle = [RelayAccess]::CreateFile($path, 0xC0000, 7, [IntPtr]::Zero, 3, 0x02000000, [IntPtr]::Zero)
+try { [pscustomobject]@{ ok = (-not $handle.IsInvalid) } | ConvertTo-Json -Compress }
+finally { $handle.Dispose() }
+
 `;
 
 export interface AclPreflight {
@@ -34,7 +36,7 @@ export function windowsWorkspaceAcl(cwd: string): AclPreflight {
   const powershell = process.env.SystemRoot ? join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : 'powershell.exe';
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
   const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], {
-    env: { ...process.env, RELAY_ACL_PATH: cwd },
+    env: childEnv({ command: powershell, args: [], env: { RELAY_ACL_PATH: cwd } }),
     encoding: 'utf8',
     windowsHide: true,
     timeout: 20_000,

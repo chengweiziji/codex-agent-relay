@@ -36,6 +36,8 @@ export class DshTransport implements AgentAdapter {
     const sessionId = `relay-${job.id}`;
     const approved = `${job.config.provider}/${job.config.model}`;
     const watched = new Set([sessionId]);
+    const children = new Map<string, { route: boolean; sandbox: boolean; policy: boolean; ended: boolean }>();
+    let closing = false;
     let receipt = '';
     let accepted = false;
     let stopped = false;
@@ -61,10 +63,10 @@ export class DshTransport implements AgentAdapter {
       fatal ??= error;
       clearTimeout(attestTimer);
       fail(error);
-      void rpc.close();
+      void rpc.close().catch(() => {});
     };
     const attest = () => {
-      if (accepted || !receipt || !routeSeen || !sandboxSeen || !policySeen) return;
+      if (fatal || accepted || !receipt || !routeSeen || !sandboxSeen || !policySeen) return;
       accepted = true;
       clearTimeout(attestTimer);
       emit({ kind: 'accepted', text: 'DeepSeek Harness 已接收任务', receipt, sessionId });
@@ -76,24 +78,34 @@ export class DshTransport implements AgentAdapter {
       }
       if (!child) routeSeen = true; attest();
     };
-    rpc.on('closed', (e: Error) => { if (!terminal) halt(fatal ?? e); });
+    rpc.on('closed', (e: Error) => { if (!closing) halt(fatal ?? e); });
     rpc.on('notification', (method: string, params: any) => {
-      if (terminal) return;
-      if (method === 'subagent.started' && params?.parentSessionId === sessionId && typeof params.childSessionId === 'string') {
+      if (fatal) return;
+      if (method === 'subagent.started' && watched.has(params?.parentSessionId) && typeof params.childSessionId === 'string') {
+        if (watched.has(params.childSessionId)) { halt(Error('Duplicate subagent session')); return; }
         watched.add(params.childSessionId);
+        children.set(params.childSessionId, { route: false, sandbox: false, policy: false, ended: false });
         emit({ kind: 'log', text: 'Harness subagent started; its route is attested too' });
         return;
       }
-      if (method === 'subagent.finished' && params?.parentSessionId === sessionId) {
+      if (method === 'subagent.finished' && watched.has(params?.parentSessionId)) {
+        const state = children.get(params.childSessionId);
+        if (!state || !state.route || !state.sandbox || !state.policy || params.status !== 'ok') { halt(Error('Subagent ended without valid provider/model and sandbox attestation or failed')); return; }
+        state.ended = true;
+        if (receipt && seenIdle && seenTurnEnd && [...children.values()].every(c => c.ended)) finish();
         emit({ kind: 'log', text: `Harness subagent finished (${params.status === 'ok' ? 'ok' : 'error'})` });
         return;
       }
-      if (!watched.has(params?.sessionId)) return;
+      if (!watched.has(params?.sessionId)) {
+        if (method === 'session.event') halt(Error('Unannounced session event; cannot verify provider/model'));
+        return;
+      }
+      const childState = children.get(params.sessionId);
       const child = params.sessionId !== sessionId;
       if (method === 'session.status') {
         if (child) return;
         if (params.status === 'running') { seenIdle = false; emit({ kind: 'running', text: 'DeepSeek Harness is executing', sessionId }); }
-        if (params.status === 'idle') { seenIdle = true; if (receipt && seenTurnEnd) finish(); }
+        if (params.status === 'idle') { seenIdle = true; if (receipt && seenTurnEnd && [...children.values()].every(c => c.ended)) finish(); }
         return;
       }
       if (method !== 'session.event') return;
@@ -101,41 +113,41 @@ export class DshTransport implements AgentAdapter {
       if (!event || typeof event.type !== 'string') return;
       if (event.type === 'request/header') {
         const config = event.data?.header?.config;
-        checkRoute(config?.provider, config?.model, 'request/header', child); return;
+        checkRoute(config?.provider, config?.model, 'request/header', child); if (childState && !fatal) childState.route = true; return;
       }
       if (event.type === 'request/context') {
-        checkRoute(event.data?.provider, event.data?.model, 'request/context', child); return;
+        checkRoute(event.data?.provider, event.data?.model, 'request/context', child); if (childState && !fatal) childState.route = true; return;
       }
       if (event.type === 'sandbox/mode') {
         if (event.data?.mode !== SANDBOX_MODE) { halt(Error(`Unapproved Harness sandbox mode (${String(event.data?.mode)}); runtime stopped`)); return; }
-        if (!child) sandboxSeen = true;
+        if (!child) sandboxSeen = true; else childState!.sandbox = true;
         attest(); return;
       }
       if (event.type === 'approval/policy') {
         if (!approvedPolicy(event.data?.policy)) { halt(Error(`Unapproved Harness approval policy (${String(event.data?.policy)}); runtime stopped`)); return; }
-        if (!child) policySeen = true;
+        if (!child) policySeen = true; else childState!.policy = true;
         attest(); return;
       }
       if (event.type === 'approval/asked') {
-        emit({ kind: 'log', text: `Harness requested approval for ${String(event.data?.toolName || 'a tool')}; the relay cannot approve it` }); return;
+        halt(Error('Harness requires user approval; no permission granted and completion is blocked')); return;
       }
       if (event.type === 'approval/decided') {
-        emit({ kind: 'log', text: `Harness approval decided: ${String(event.data?.outcome || 'unknown')}` }); return;
+        halt(Error('Unexpected approval decision; completion is blocked pending user review')); return;
       }
-      if (child) return;
       if (event.type === 'assistant/message') {
         const source = event.data?.message?.source;
         if (source?.kind === 'model' && (source.provider !== job.config.provider || source.model !== job.config.model)) {
           halt(Error(`Assistant message came from ${String(source.provider)}/${String(source.model)}, not the approved route ${approved}; runtime stopped`)); return;
         }
+        if (child) return;
         const content = event.data?.message?.content;
         response = Array.isArray(content) ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') : '';
         if (response) emit({ kind: 'log', text: response });
-      } else if (event.type === 'turn/end') {
+      } else if (event.type === 'turn/end' && !child) {
         seenTurnEnd = true;
         const reason = event.data?.reason;
         if (reason?.kind !== 'completed') turnError = `Harness turn did not complete: ${JSON.stringify(reason)}`;
-        if (receipt && seenIdle) finish();
+        if (receipt && seenIdle && [...children.values()].every(c => c.ended)) finish();
       } else if (/tool|inbox\/spliced|turn\/start/.test(event.type)) {
         // Only metadata is relayed. Tool arguments/results can contain credentials or large data.
         emit({ kind: 'log', text: event.type });
@@ -152,8 +164,14 @@ export class DshTransport implements AgentAdapter {
         receipt = enqueued.messageId;
         attestTimer = setTimeout(() => halt(Error('Actual provider/model and sandbox attestation did not arrive; runtime stopped without acceptance')), launch.receiptTimeoutMs ?? 15_000);
         attest();
-        if (seenIdle && seenTurnEnd) finish();
+        if (seenIdle && seenTurnEnd && [...children.values()].every(c => c.ended)) finish();
         await interval;
+        clearTimeout(timeout);
+        // Keep validating notifications until the owned transport has actually stopped.
+        closing = true;
+        await rpc.close();
+        if (fatal) throw fatal;
+        if ([...children.values()].some(c => !c.route || !c.sandbox || !c.policy || !c.ended)) throw Error('Subagent provider/model attestation or completion missing');
         if (stopped) throw Error('Cancelled by user');
         if (!accepted) throw Error('Actual provider/model and sandbox attestation did not arrive; runtime stopped without acceptance');
         if (turnError) throw Error(turnError);
@@ -162,7 +180,7 @@ export class DshTransport implements AgentAdapter {
         emit({ kind: marker === 'waiting_user' ? 'waiting_user' : 'ended', text: response, reportedComplete: marker === 'completed' });
       } catch (e: any) {
         throw fatal ?? e;
-      } finally { clearTimeout(timeout); clearTimeout(attestTimer); await rpc.close(); }
+      } finally { closing = true; clearTimeout(timeout); clearTimeout(attestTimer); await rpc.close(); }
     })();
     return { done, stop: async () => { stopped = true; halt(Error('Cancelled by user')); await rpc.close(); } };
   }

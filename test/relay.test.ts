@@ -103,7 +103,7 @@ for(const change of ['pause','disable','operation'] as const)test(`handoff reche
   if(change==='operation')task.inFlight.push('new-operation');
   release();await assert.rejects(pending,/active|disabled|operations/);assert.equal(relay.jobs.length,0);
 });
-for(const [model,pattern] of [['invalid',/Unavailable/],['no-receipt',/timeout/],['crash',/exited/],['hang',/deadline/],['wrong-route',/provider\/model/],['no-route',/provider\/model/],['child-route',/provider\/model/],['child-attest',/provider\/model/],['danger',/sandbox mode/],['bad-policy',/approval policy/]] as const)test(`${model} is a failed handoff or run, not success`,async t=>{
+for(const [model,pattern] of [['invalid',/Unavailable/],['no-receipt',/timeout/],['crash',/exited/],['hang',/deadline/],['wrong-route',/provider\/model/],['no-route',/provider\/model/],['child-route',/provider\/model/],['child-attest',/provider\/model/],['danger',/sandbox mode/],['bad-policy',/approval policy/],['approval',/approval/],['grandchild-route',/provider\/model/],['child-missing',/attestation/],['child-source',/approved route/],['late-route',/provider\/model/]] as const)test(`${model} is a failed handoff or run, not success`,async t=>{
   const {relay,task}=await setup(t,model);const job=await relay.handoff({taskId:task.id,instruction:'Continue'});await settle(relay,job.id);
   assert.equal(job.state,'failed');assert.match(job.error!,pattern);assert.equal(job.reportedComplete,false);
 });
@@ -183,4 +183,18 @@ for(const change of ['checkpoint','empty-remaining','instruction','launch'] as c
   const result=await pending;assert.match(result.error?.message||'',/changed during secret scan/);
   assert.equal(relay.jobs.length,0);assert.equal(task.jobId,undefined);assert.equal(existsSync(count),false);
   assert.ok(!readFileSync(capture,'utf8').includes('unscanned replacement'));
+});
+
+for(const registered of [true,false])test(`workspace fence covers another ${registered?'registered':'unregistered'} chat`,async t=>{
+ const {relay,task,project}=await setup(t);
+ if(registered)await relay.register({cwd:project,sessionId:'other',checkpoint});
+ await relay.hook({cwd:project,session_id:'other',hook_event_name:'PreToolUse',tool_name:'shell',tool_use_id:'other-write'});
+ await assert.rejects(relay.handoff({taskId:task.id,instruction:'Continue'}),/operations/);
+ assert.equal(relay.jobs.length,0);
+ await relay.hook({cwd:project,session_id:'other',hook_event_name:'PostToolUse',tool_name:'shell',tool_use_id:'other-write'});
+ const job=await relay.handoff({taskId:task.id,instruction:'Continue'});await settle(relay,job.id);assert.equal(job.state,'ended');
+});
+
+test('fully attested child can complete with the main session',async t=>{
+ const {relay,task}=await setup(t,'child-valid');const job=await relay.handoff({taskId:task.id,instruction:'Continue'});await settle(relay,job.id);assert.equal(job.state,'ended',job.error);assert.equal(job.reportedComplete,true);
 });

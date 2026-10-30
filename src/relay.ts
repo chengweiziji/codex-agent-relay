@@ -18,6 +18,8 @@ export class Relay extends EventEmitter {
   tasks: Task[] = [];
   jobs: Job[] = [];
   runs = new Map<string, AgentRun>();
+  operations: Record<string, { session: string; id: string }[]> = {};
+  workspaceBusy(cwd: string): boolean { return !!this.operations[pathKey(cwd)]?.length || this.tasks.some(t => pathKey(t.cwd) === pathKey(cwd) && t.inFlight.length > 0); }
   launches = new Map<string, Promise<Job>>();
   quota: QuotaReader;
   timer?: NodeJS.Timeout;
@@ -28,7 +30,8 @@ export class Relay extends EventEmitter {
   constructor(home: string, quota?: QuotaReader) {
     super(); this.home = home;
     mkdirSync(join(home, 'events'), { recursive: true, mode: 0o700 });
-    const saved = readJSON<{ tasks: Task[]; jobs: Job[] }>(join(home, 'state.json'), { tasks: [], jobs: [] });
+    const saved = readJSON<{ tasks: Task[]; jobs: Job[]; operations?: Record<string, { session: string; id: string }[]> }>(join(home, 'state.json'), { tasks: [], jobs: [] });
+    this.operations = saved.operations || {};
     this.tasks = saved.tasks; this.jobs = saved.jobs;
     for (const job of this.jobs) if (liveStates.has(job.state)) { job.state = 'failed'; job.recoveryRequired = true; job.error = 'Relay restarted; previous execution state is unknown. Inspect existing processes before retrying. No task was resent.'; }
     for (const task of this.tasks) { task.inFlight = []; task.checkpointFresh = false; if (task.state === 'active') task.state = 'paused'; }
@@ -52,7 +55,7 @@ export class Relay extends EventEmitter {
     for (const j of this.jobs) if (expired.has(j.id) && j.recoveryRequired) { j.result = undefined; j.verification = null; j.instruction = '[Expired]'; j.checkpoint = { ...j.checkpoint, goal: '[Expired]', completed: [], remaining: [], decisions: [], files: [], tests: [], processes: [], acceptance: [], permissions: '' }; }
     this.jobs = this.jobs.filter(j => !expired.has(j.id) || j.recoveryRequired);
     this.tasks = this.tasks.filter(t => !(t.jobId && expired.has(t.jobId) && !this.jobs.some(j => j.id === t.jobId)) && (t.state === 'active' || !!t.jobId || Date.parse(t.updatedAt) >= cutoff));
-    atomicJSON(join(this.home, 'state.json'), persistedState(this.tasks, this.jobs)); this.emit('change');
+    atomicJSON(join(this.home, 'state.json'), { ...persistedState(this.tasks, this.jobs), operations: this.operations }); this.emit('change');
   }
   event(job: Job, kind: string, text: string): void {
     const events = this.events(job.id);
@@ -94,6 +97,8 @@ export class Relay extends EventEmitter {
     if (input.backgroundToolIds?.length) {
       if (!checkpoint.processes.length) throw Error('Record background process IDs and inspection evidence first');
       task.inFlight = task.inFlight.filter(id => !input.backgroundToolIds.includes(id));
+      const key = pathKey(task.cwd);
+      this.operations[key] = (this.operations[key] || []).filter(op => op.session !== task.sessionId || !input.backgroundToolIds.includes(op.id));
     }
     this.save(); return task;
   }
@@ -139,13 +144,13 @@ export class Relay extends EventEmitter {
     let project = findProject(task.cwd, this.home);
     if (!project?.config.enabled) throw Error('Project relay disabled');
     if (task.state !== 'active' || task.mode === 'plan' || !task.checkpoint.remaining.length) throw Error('Only unfinished, active execution tasks may be handed off');
-    if (task.inFlight.length) throw Error(`Wait for tool operations to finish: ${task.inFlight.join(', ')}`);
+    if (this.workspaceBusy(task.cwd)) throw Error(`Wait for tool operations to finish: ${task.inFlight.join(', ')}`);
     await this.refresh();
     // User state, configuration and tool activity may change while quota is being read.
     project = findProject(task.cwd, this.home);
     if (!project?.config.enabled) throw Error('Project relay disabled');
     if (task.state !== 'active' || task.mode === 'plan' || !task.checkpoint.remaining.length) throw Error('Only unfinished, active execution tasks may be handed off');
-    if (task.inFlight.length) throw Error(`Wait for tool operations to finish: ${task.inFlight.join(', ')}`);
+    if (this.workspaceBusy(task.cwd)) throw Error(`Wait for tool operations to finish: ${task.inFlight.join(', ')}`);
     const left = remaining(this.quota.snapshot, project.config.quotaBucket);
     if (left === null) throw Error('Quota unknown; handoff not started');
     if (left <= 0) throw Error('Quota already exhausted; preserve checkpoint for manual recovery');
@@ -162,7 +167,7 @@ export class Relay extends EventEmitter {
     const checkpointHash = digest(payload.checkpoint);
     await scanSecrets(task.cwd, payload, readUser(this.home).scanner);
     project = findProject(task.cwd, this.home);
-    if (!project?.config.enabled || JSON.stringify(project.config) !== approvedConfig || task.state !== 'active' || task.inFlight.length || task.mode === 'plan') throw Error('Task or approved configuration changed during preflight; handoff blocked');
+    if (!project?.config.enabled || JSON.stringify(project.config) !== approvedConfig || task.state !== 'active' || this.workspaceBusy(task.cwd) || task.mode === 'plan') throw Error('Task or approved configuration changed during preflight; handoff blocked');
     if (!task.checkpoint.remaining.length || digest(task.checkpoint) !== checkpointHash || input.instruction !== payload.instruction) throw Error('Checkpoint or instruction changed during secret scan; handoff blocked. Update the checkpoint and retry.');
     if (digest(readUser(this.home).agents[project.config.agent]) !== approvedLaunch) throw Error('Launch configuration changed during secret scan; handoff blocked');
     const currentLeft = remaining(this.quota.snapshot, project.config.quotaBucket);
@@ -219,8 +224,21 @@ export class Relay extends EventEmitter {
     const tool = h.tool_name || '';
     const owner = this.jobs.find(j => pathKey(j.cwd) === pathKey(h.cwd) && (liveStates.has(j.state) || this.runs.has(j.id) || j.recoveryRequired));
     if (event === 'PreToolUse' && (owner || task?.jobId) && !safeTool(tool)) return { hookSpecificOutput: { hookEventName: event, permissionDecision: 'deny', permissionDecisionReason: 'An external Agent owns this workspace or requires recovery inspection. Check the relay dashboard.' } };
+    const key = pathKey(h.cwd);
+    if (event === 'PostToolUse' || event === 'PostToolUseFailure') {
+      this.operations[key] = (this.operations[key] || []).filter(op => op.session !== h.session_id || op.id !== h.tool_use_id);
+      if (!this.operations[key].length) delete this.operations[key];
+      if (task) task.inFlight = task.inFlight.filter(id => id !== h.tool_use_id);
+      this.save();
+    }
     const project = findProject(h.cwd, this.home);
     if (!project?.config.enabled) return {};
+    if (event === 'PreToolUse' && !safeTool(tool)) {
+      if (!h.tool_use_id || !h.session_id) return { hookSpecificOutput: { hookEventName: event, permissionDecision: 'deny', permissionDecisionReason: 'Missing tool/session identity; cannot safely track workspace operations.' } };
+      const ops = this.operations[key] ||= [];
+      if (!ops.some(op => op.session === h.session_id && op.id === h.tool_use_id)) ops.push({ session: h.session_id, id: h.tool_use_id });
+      this.save();
+    }
     const output = (text: string) => ({ hookSpecificOutput: { hookEventName: event, additionalContext: text } });
     if (!task) {
       if (['SessionStart','UserPromptSubmit'].includes(event) && h.permission_mode !== 'plan') return output(`This project enabled Codex Agent Relay. For an execution task, use the codex-agent-relay skill and relay_register with sessionId ${h.session_id}, cwd ${h.cwd}. Maintain checkpoints and mark completion; do not register casual questions. Configure target: ${project.config.agent}/${project.config.model}.`);

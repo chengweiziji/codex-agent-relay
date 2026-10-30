@@ -19,6 +19,7 @@ jobs:
       - run: pnpm check
       - run: node scripts/install-test-scanner.ts
       - run: pnpm test
+      - run: node scripts/hooks-e2e.ts
       - run: pnpm pack:release
       - uses: actions/upload-artifact@v4
         with:

@@ -3,7 +3,8 @@
 // a Harness launch (RELAY_SMOKE_DSH or agents.deepseek-harness in user.json)
 // and the credential environment variable (DEEPSEEK_API_KEY by default).
 // Optional: RELAY_SMOKE_DSH_TEMPLATE copies profiles/sdk from an existing Harness home.
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -67,6 +68,7 @@ const project = mkdtempSync(join(process.platform === 'win32' ? homedir() : tmpd
 writeFileSync(join(project, 'sum.cjs'), 'module.exports = (a, b) => a - b;\n');
 writeFileSync(join(project, 'test.cjs'), "const assert=require('node:assert/strict'); assert.equal(require('./sum.cjs')(2,3),5); console.log('SMOKE_TEST_PASSED');\n");
 
+const originalTestHash = createHash('sha256').update(readFileSync(join(project, 'test.cjs'))).digest('hex');
 const config: ProjectConfig = { version: 1, enabled: true, agent: 'deepseek-harness', provider, model, thresholdPercent: 5, quotaBucket: 'codex' };
 saveProject(project, config, home);
 
@@ -107,14 +109,17 @@ try {
   console.log('RESULT', job.result);
   console.log('EVENTS', JSON.stringify(relay.events(job.id).map(e => ({ seq: e.seq, kind: e.kind, text: e.text.slice(0, 400) })), null, 2));
   const sum = readFileSync(join(project, 'sum.cjs'), 'utf8').trim();
-  const test = spawnSync(process.execPath, ['test.cjs'], { cwd: project, encoding: 'utf8' });
+  const test = spawnSync(process.execPath, ['test.cjs'], { cwd: project, encoding: 'utf8', timeout: 30_000 });
   console.log('SUM', sum);
   console.log('INDEPENDENT_TEST', JSON.stringify({ status: test.status, stdout: test.stdout.trim(), stderr: test.stderr.trim() }));
   console.log('PATHS', JSON.stringify({ project, home, dshHome }));
   console.log('NOTE', 'Independent check run by this script, not relay_verify. Completion remains self-reported.');
-  exitCode = job.state === 'ended' && test.status === 0 ? 0 : 1;
+  const testHash = createHash('sha256').update(readFileSync(join(project, 'test.cjs'))).digest('hex');
+  const onlyExpectedFiles = readdirSync(project).sort().join(',') === 'sum.cjs,test.cjs';
+  const accepted = !!job.receipt && job.state === 'ended' && job.reportedComplete && test.status === 0 && originalTestHash === testHash && onlyExpectedFiles;
+  atomicJSON(join(base, 'verification.json'), { accepted, jobId: job.id, provider, model, originalTestHash, testHash, onlyExpectedFiles, command: [process.execPath, 'test.cjs'], exitCode: test.status, outputHash: createHash('sha256').update(test.stdout || '').digest('hex') });
+  exitCode = accepted ? 0 : 1;
 } finally {
   await relay.close();
 }
 process.exitCode = exitCode;
-
